@@ -33,10 +33,10 @@ if hilbert_xp is None:
     hilbert_xp = s_hilbert
 
 # -------- parâmetros do usuário --------
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\1_CUBDL_Task1_Data\INS015.hdf5"
+path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\3_Additional_CUBDL_Data\Focused_Data\OSL\OSL011.hdf5"
 
 nx, nz = 128, 512              # resolução da imagem
-num_angulos_usados = 8        # None -> usar todos; ou um int (ex.: 9, 13, ...)
+num_angulos_usados = None     # None -> usar todos; ou um int (ex.: 9, 13, ...)
 faixa_dB = 60                 # faixa dinâmica para plot
 
 # -------- utilidades --------
@@ -79,7 +79,10 @@ with h5py.File(path, "r") as f:
     t0 = float(np.array(f["/start_time"][()]).ravel()[0])
     fs = float(np.array(f["/sampling_frequency"][()]).ravel()[0])
     c = float(np.array(f["/sound_speed"][()]).ravel()[0]) if "/sound_speed" in f else 1540.0
-
+    
+    teste = f["/beamformed_data"][()].T
+      
+    print(f" fs => {teste.shape}")
     # ângulos (vários nomes possíveis)
     ang = None
     for k in ("/transmit_direction", "/angles", "/tx_angles", "/angles_deg", "/angles_rad"):
@@ -185,12 +188,27 @@ img_db = xp.clip(img_db, -faixa_dB, 0)
 
 # trazer para CPU para plot
 img_db_cpu = to_cpu(img_db)
+
+
+print(f"imagem => {img_db_cpu.shape}")
+
+
 grade_x_cpu = to_cpu(grade_x)
 grade_z_cpu = to_cpu(grade_z)
 
 # plot em mm
 extent_mm = [grade_x_cpu[0]*1e3, grade_x_cpu[-1]*1e3,
              grade_z_cpu[-1]*1e3, grade_z_cpu[0]*1e3]
+plt.figure(figsize=(6,8))
+plt.imshow(teste, cmap="gray", extent=extent_mm,
+           aspect="auto", vmin=-faixa_dB, vmax=0)
+plt.xlabel("Lateral (mm)")
+plt.ylabel("Profundidade (mm)")
+plt.title(f"B-mode DAS")
+plt.colorbar(label="dB")
+plt.tight_layout()
+
+
 plt.figure(figsize=(6,8))
 plt.imshow(img_db_cpu, cmap="gray", extent=extent_mm,
            aspect="auto", vmin=-faixa_dB, vmax=0)
