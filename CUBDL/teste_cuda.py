@@ -1,3 +1,5 @@
+# teste em outra branch
+
 import cupy as cp, time
 
 print("=== Teste GPU sem cuRAND ===")
