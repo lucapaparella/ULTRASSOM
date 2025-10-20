@@ -1,7 +1,7 @@
 import h5py
 # Caminho do arquivo
 
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\2_Post_CUBDL_JHU_Breast_Data\JHU030.hdf5"
+path = r"C:\Users\luca37994\Documents\ULTRASSOM\1_CUBDL_Task1_Data\OSL010\OSL010.hdf5"
 
 # Abrindo o arquivo
 arquivo = h5py.File(path, "r")
