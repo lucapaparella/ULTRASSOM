@@ -3,9 +3,9 @@
 # ================================
 import os, matplotlib
 
-assert os.environ.get("DISPLAY"), "X11 não ativo — reconecte com ssh -X"
+# assert os.environ.get("DISPLAY"), "X11 não ativo — reconecte com ssh -X"
 
-matplotlib.use("TkAgg")
+matplotlib.use("Agg")  # usa backend sem interface
 
 import h5py, numpy as np, matplotlib.pyplot as plt
 from tqdm.auto import tqdm
