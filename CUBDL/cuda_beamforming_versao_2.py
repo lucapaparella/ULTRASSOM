@@ -1,6 +1,12 @@
 # ================================
 # DAS (plane-wave) + Compounding coerente (CUDA-ready) — versão otimizada
 # ================================
+import os, matplotlib
+
+assert os.environ.get("DISPLAY"), "X11 não ativo — reconecte com ssh -X"
+
+matplotlib.use("TkAgg")
+
 import h5py, numpy as np, matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
@@ -32,7 +38,7 @@ if hilbert_xp is None:
     hilbert_xp = s_hilbert
 
 # -------- parâmetros do usuário --------
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\2_Post_CUBDL_JHU_Breast_Data\JHU030.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/JHU030.hdf5"
 
 # nx, nz = 128, 512              # resolução da imagem
 num_angulos_usados = None      # None -> usar todos; ou um int (ex.: 9, 13, ...)

@@ -18,11 +18,11 @@ TX_APERT_MARGIN  = 1.2      # margem na abertura projetada (apod_plane)
 CLIP_INDICES     = True     # clip dos índices fracionários para faixa válida
 
 # -------- parâmetros do usuário --------
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\1_CUBDL_Task1_Data\INS015.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/INS015.hdf5"
 
 
 nx, nz = 128, 512            # resolução da imagem
-num_angulos_usados = 3    # None -> usar todos; senão um int (ex.: 9, 13, ...)
+num_angulos_usados = None    # None -> usar todos; senão um int (ex.: 9, 13, ...)
 faixa_dB = 60                # faixa dinâmica para plot
 
 # --------- Backend: CUDA (CuPy) se disponível; caso contrário NumPy ----------

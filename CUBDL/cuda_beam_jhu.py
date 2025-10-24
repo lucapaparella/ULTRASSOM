@@ -6,7 +6,7 @@ import os
 os.system("cls")
 
 # Caminho do arquivo
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\2_Post_CUBDL_JHU_Breast_Data\JHU030.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/JHU030.hdf5"
 # Abrindo o arquivo
 
 arquivo = h5py.File(path, "r")
@@ -66,7 +66,8 @@ angles = np.array(arquivo["angles"])
 fc = np.array(arquivo["modulation_frequency"]).item()
 fs = np.array(arquivo["sampling_frequency"]).item()
 c = np.array(arquivo["sound_speed"]).item()
-
+tamanho_pixel = np.array(arquivo["pixel_d"]).item()
+print(f"Tamanho pixel => {tamanho_pixel}")
 # [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
 # o -1 faz que o tempo do pulso emitido seja 0
 tempo_zero = -1 * np.array(arquivo["time_zero"], dtype="float32")
@@ -82,13 +83,33 @@ print(f"posicoes_elementos => {posicoes_elementos.shape}")
 # print(f"ele_pos=> {ele_pos.shape}")
 # print(f"ele_pos dados => {ele_pos}")
 
+#Amostras 
+amostras = idata.shape[2] 
+
 # GRADE de imagem (CPU primeiro; depois mandamos p/ GPU se houver)
-# Profundidade (zlims)
-limite_z = np.array([0e-3, idata.shape[2] * c / fs / 2])
-print(f"zlims => {limite_z}")
+
+# Profundidade Fisica em metros
+z_max= amostras * c / fs / 2
+print(f"z_max  => {z_max}")
+# Posição minima e mxima dos eleentr=so do trasdutor
+x_min = posicoes_elementos[0]
+x_max = posicoes_elementos[-1]
+
+
+# Essa fórmula calcula quantos pixels (nx) cabem na largura total (x_max - x_min) 
+# o +1 é utilizado para incluir a borda
+nx = round((x_max - x_min)/tamanho_pixel) + 1
+print(f"nx => {nx}")
+# Mesma lógica para profundidade:
+nz = round(z_max/tamanho_pixel) + 1
+print("nz =", nz)
+
 # Largura Sonda (xlims)
-limite_x = np.array([posicoes_elementos[0], posicoes_elementos[-1]])
-print(f"xlims => {limite_x}")
+limite_x = np.linspace(x_min, x_max, nx)
+print(f"limite_x => {limite_x}")
+# limites da profondidade
+limite_z = np.linspace(0e-3, z_max,nz)
+print(f"limite_z=> {limite_z}")
 
 
 
@@ -103,4 +124,21 @@ idata = as_xp(idata, dtype=(xp.float32 if xp is not np else np.float32))
 qdata = hilbert_xp(idata, axis=-1).astype(xp.complex64)
 print(f"qdata => {qdata.shape}")
 print(f"angles => {angles.shape}")
+
+escala = 1e3
+img = arquivo["/beamformed_data"][:]
+
+
+
+img = 10* np.log10(np.abs(img.T) / np.max(np.abs(img)))
+
+
+plt.figure(figsize=(6, 8))
+plt.imshow(img, cmap="gray", origin="upper", aspect="auto",
+           extent=[x_min*escala, x_max*escala, z_max*escala, 0*escala])
+# plt.imshow(img, cmap="gray", origin="upper", aspect="auto")
+plt.title("Imagem beamformed (transposta)")
+plt.xlabel("Lateral (x)")
+plt.ylabel("Profundidade (z)")
+plt.show()
 

@@ -6,9 +6,9 @@ from scipy.signal import hilbert
 from tqdm.auto import tqdm
 
 # -------- parâmetros do usuário --------
-path = r"C:\Users\lucap\Documents\CUBDL\OSL010.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/OSL010/OSL010.hdf5"
 nx, nz = 128, 512                 # resolução da imagem
-num_angulos_usados = 1        # None -> usar todos; ou um int (ex.: 9, 13, ...)
+num_angulos_usados = None       # None -> usar todos; ou um int (ex.: 9, 13, ...)
 faixa_dB = 60                     # faixa dinâmica para plot
 
 # -------- utilidades --------
