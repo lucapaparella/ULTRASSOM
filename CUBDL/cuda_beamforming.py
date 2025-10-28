@@ -33,12 +33,11 @@ if hilbert_xp is None:
     hilbert_xp = s_hilbert
 
 # -------- parâmetros do usuário --------
-path = r"C:\Users\lucap\Documents\CUBDL_Data\CUBDL_Data\3_Additional_CUBDL_Data\Focused_Data\OSL\OSL011.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/OneDrive_3_20-10-2025/3_Additional_CUBDL_Data/Focused_Data/OSL/OSL011.hdf5"
 
 nx, nz = 128, 512              # resolução da imagem
 num_angulos_usados = None     # None -> usar todos; ou um int (ex.: 9, 13, ...)
 faixa_dB = 60                 # faixa dinâmica para plot
-
 # -------- utilidades --------
 def janela_hann(n, backend=np):
     n0 = backend.arange(n, dtype=backend.float32)

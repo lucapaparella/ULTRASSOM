@@ -1,10 +1,11 @@
-import h5py, numpy as np, matplotlib.pyplot as plt
+import h5py, numpy as np
+import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import os
 from pathlib import Path
 import os, matplotlib
 
-matplotlib.use("Agg")     # sem X11 → salva em arquivo
+# matplotlib.use("Agg")     # sem X11 → salva em arquivo
 
 #limpar a tela
 os.system("cls")
@@ -17,7 +18,7 @@ arquivo = h5py.File(path, "r")
 
 #salvar arquivo
 def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS_SALVAS", dpi=200):
-    """Salva a figura atual em ./figs/<nome_base>[_N].png e imprime o caminho."""
+    """Salva a figura atual em ./IMAGENS_SALVAS/<nome_base>[_N].png e imprime o caminho."""
     fig = fig or plt.gcf()
     Path(pasta).mkdir(parents=True, exist_ok=True)
     i = 0
@@ -134,13 +135,16 @@ print(f"limite_z=> {limite_z}")
 
 
 
-# --- Helper para criar array no backend correto (NumPy ou CuPy)
+# --- HELPER para criar array no backend correto (NumPy ou CuPy)
 def as_xp(a, dtype=None):
     if xp is np:
         return np.asarray(a, dtype=dtype)
     else:
         return xp.asarray(a, dtype=dtype)
+    
+#chamada do HELPER
 idata = as_xp(idata, dtype=(xp.float32 if xp is not np else np.float32))
+
 # sinal analítico por canal (interp fracionária estável de fase)
 qdata = hilbert_xp(idata, axis=-1).astype(xp.complex64)
 print(f"qdata => {qdata.shape}")
@@ -163,5 +167,5 @@ plt.xlabel("Lateral (x)")
 plt.ylabel("Profundidade (z)")
 plt.show()
 
-# >>> Salva em ./figs/reconstrucao.png (ou reconstrucao_1.png, etc.)
+# >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
 save_fig(nome_base="reconstrucao")
