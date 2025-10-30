@@ -84,11 +84,11 @@ idata = np.array(arquivo["channel_data"], dtype="float32")
 print(f"idata => {idata.shape}")
 # qdata = np.imag(hilbert_xp(idata, axis=-1))
 # sinal analítico por canal (interp fracionária estável de fase)
-angles = np.array(arquivo["angles"])
-fc = np.array(arquivo["modulation_frequency"]).item()
-fs = np.array(arquivo["sampling_frequency"]).item()
-c = np.array(arquivo["sound_speed"]).item()
-tamanho_pixel = np.array(arquivo["pixel_d"]).item()
+angles = xp.array(arquivo["angles"])
+fc = xp.array(arquivo["modulation_frequency"]).item()
+fs = xp.array(arquivo["sampling_frequency"]).item()
+c =xp.array(arquivo["sound_speed"]).item()
+tamanho_pixel = xp.array(arquivo["pixel_d"]).item()
 print(f"Tamanho pixel => {tamanho_pixel}")
 # [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
 # o -1 faz que o tempo do pulso emitido seja 0
@@ -98,14 +98,14 @@ print(f"tempo_zero => {tempo_zero.shape}")
 fdemod = 0
 
 # Transforma o dataset em uma lista de posições dos elementos (128,) => (128, 3) com [x, y, z] ????????
-posicoes_elementos = np.array(arquivo["element_positions"], dtype="float32")
+posicoes_elementos = xp.array(arquivo["element_positions"], dtype="float32")
 print(f"posicoes_elementos => {posicoes_elementos.shape}")
 # print(f"posicoes_elementos => {posicoes_elementos}")
 # ele_pos = np.stack([posicoes_elementos, 0 * posicoes_elementos, 0 * posicoes_elementos], axis=1)
 # print(f"ele_pos=> {ele_pos.shape}")
 # print(f"ele_pos dados => {ele_pos}")
 
-#Amostras 
+#Amostras do channel_data => (73, 128, 1558)
 amostras = idata.shape[2] 
 
 # GRADE de imagem (CPU primeiro; depois mandamos p/ GPU se houver)
@@ -120,17 +120,19 @@ x_max = posicoes_elementos[-1]
 
 # Essa fórmula calcula quantos pixels (nx) cabem na largura total (x_max - x_min) 
 # o +1 é utilizado para incluir a borda
-nx = round((x_max - x_min)/tamanho_pixel) + 1
+nx = xp.round((x_max - x_min)/tamanho_pixel) + 1 # round => arredondamento para interiro
+nx = int(nx) # converter em inteiro para não dar erro no cupy
 print(f"nx => {nx}")
 # Mesma lógica para profundidade:
-nz = round(z_max/tamanho_pixel) + 1
+nz = xp.round(z_max/tamanho_pixel) + 1
+nz = int(nz)
 print("nz =", nz)
 
 # Largura Sonda (xlims)
-limite_x = np.linspace(x_min, x_max, nx)
+limite_x = xp.linspace(x_min, x_max, nx)
 print(f"limite_x => {limite_x}")
 # limites da profondidade
-limite_z = np.linspace(0e-3, z_max,nz)
+limite_z = xp.linspace(0e-3, z_max,nz)
 print(f"limite_z=> {limite_z}")
 
 
@@ -142,7 +144,7 @@ def as_xp(a, dtype=None):
     else:
         return xp.asarray(a, dtype=dtype)
     
-#chamada do HELPER
+#chamada do HELPER => NumPy ou CuPy
 idata = as_xp(idata, dtype=(xp.float32 if xp is not np else np.float32))
 
 # sinal analítico por canal (interp fracionária estável de fase)
@@ -150,22 +152,43 @@ qdata = hilbert_xp(idata, axis=-1).astype(xp.complex64)
 print(f"qdata => {qdata.shape}")
 print(f"angles => {angles.shape}")
 
-escala = 1e3
-img = arquivo["/beamformed_data"][:]
+sin_t, cos_t = xp.sin(angles), xp.cos(angles)
+
+print(f"sint_t => {sin_t.shape}")
+print(f"cos_t => {cos_t.shape}")
+
+zz, xx = xp.meshgrid(limite_z, limite_x, indexing="ij")  # zz:(nz,nx)  xx:(nz,nx)
+print(f"zz => {zz.shape}")
+print(f"xx => {xx.shape}")
+t_tx = (zz[None,:,:] * cos_t[:,None,None] + xx[None,:,:] * sin_t[:,None,None]) / c  # (angulos,nz, nx)
+print(f"t_tx => {t_tx.shape}")
+
+
+##################################
+##     INTERPOLAÇÃO COMPLEXA    ##
+##################################
 
 
 
-img = 10* np.log10(np.abs(img.T) / np.max(np.abs(img)))
 
 
-plt.figure(figsize=(6, 8))
-plt.imshow(img, cmap="gray", origin="upper", aspect="auto",
-           extent=[x_min*escala, x_max*escala, z_max*escala, 0*escala])
-# plt.imshow(img, cmap="gray", origin="upper", aspect="auto")
-plt.title("Imagem beamformed (transposta)")
-plt.xlabel("Lateral (x)")
-plt.ylabel("Profundidade (z)")
-plt.show()
 
-# >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
-save_fig(nome_base="reconstrucao")
+# escala = 1e3
+# img = arquivo["/beamformed_data"][:]
+
+
+
+# img = 10* np.log10(np.abs(img.T) / np.max(np.abs(img)))
+
+
+# plt.figure(figsize=(6, 8))
+# plt.imshow(img, cmap="gray", origin="upper", aspect="auto",
+#            extent=[x_min*escala, x_max*escala, z_max*escala, 0*escala])
+# # plt.imshow(img, cmap="gray", origin="upper", aspect="auto")
+# plt.title("Imagem beamformed (transposta)")
+# plt.xlabel("Lateral (x)")
+# plt.ylabel("Profundidade (z)")
+# plt.show()
+
+# # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
+# save_fig(nome_base="reconstrucao")

@@ -9,6 +9,22 @@ matplotlib.use("Agg")  # usa backend sem interface
 
 import h5py, numpy as np, matplotlib.pyplot as plt
 from tqdm.auto import tqdm
+from pathlib import Path
+
+#salvar arquivo
+def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS_SALVAS", dpi=200):
+    """Salva a figura atual em ./IMAGENS_SALVAS/<nome_base>[_N].png e imprime o caminho."""
+    fig = fig or plt.gcf()
+    Path(pasta).mkdir(parents=True, exist_ok=True)
+    i = 0
+    while True:
+        sufixo = "" if i == 0 else f"_{i}"
+        path = Path(pasta) / f"{nome_base}{sufixo}.png"
+        if not path.exists():
+            break
+        i += 1
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    print(f"[OK] Figura salva em: {path}")
 
 # --------- Backend: CUDA (CuPy) se disponível; caso contrário NumPy ----------
 USE_CUDA = True
@@ -38,7 +54,7 @@ if hilbert_xp is None:
     hilbert_xp = s_hilbert
 
 # -------- parâmetros do usuário --------
-path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/JHU030.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/JHU031.hdf5"
 
 # nx, nz = 128, 512              # resolução da imagem
 num_angulos_usados = None      # None -> usar todos; ou um int (ex.: 9, 13, ...)
@@ -94,37 +110,39 @@ with h5py.File(path, "r") as f:
     # t0 = float(np.array(f["/start_time"][()]).ravel()[0])
     fs = float(np.array(f["/sampling_frequency"][()]).ravel()[0])
     c  = float(np.array(f["/sound_speed"][()]).ravel()[0]) if "/sound_speed" in f else 1540.0
-   
+    tamanho_pixel = xp.array(f["/pixel_d"]).item()
     if "/start_time" in f:
         t0 = float(np.array(f["/start_time"][()]).ravel()[0])
     else:
         t0 = float(np.array(f["/time_zero"][()]).ravel()[0])
 
     
-    # tenta pixel_positions (presentes em alguns datasets)
-    if "/pixel_positions" in f:
-        nx, nz = f["/pixel_positions"].shape[1], f["/pixel_positions"].shape[2]
-        print(f["/pixel_positions"].shape[0])
+    # # tenta pixel_positions (presentes em alguns datasets)
+    # if "/pixel_positions" in f:
+    #     nx, nz = f["/pixel_positions"].shape[1], f["/pixel_positions"].shape[2]
+    #     print(f["/pixel_positions"].shape[0])
 
-    # tenta depth_axis e angles (caso beamformed_data não exista)
-    elif "/depth_axis" in f and "/angles" in f:
-        nz = f["/depth_axis"].shape[-1]
-        nx = f["/angles"].shape[-1]
+    # # tenta depth_axis e angles (caso beamformed_data não exista)
+    # elif "/depth_axis" in f and "/angles" in f:
+    #     nz = f["/depth_axis"].shape[-1]
+    #     nx = f["/angles"].shape[-1]
     
-    # tenta usar beamformed_data (caso exista)
-    elif "/beamformed_data" in f:
-        shape =f["/beamformed_data"].shape
-        if len(shape)==2:
-            nx, nz = shape
-        else:
-            _,nx, nz = shape
+    # # tenta usar beamformed_data (caso exista)
+    # elif "/beamformed_data" in f:
+    #     shape =f["/beamformed_data"].shape
+    #     if len(shape)==2:
+    #         nx, nz = shape
+    #     else:
+    #         _,nx, nz = shape
         
 
-    else:
-        # fallback
-        nx, nz = 128, 512
+    # else:
+    #     # fallback
+    #     nx, nz = 128, 512
 
-    print(f"[INFO] Parâmetros de grade: nx = {nx}, nz = {nz}")
+    
+
+    # print(f"[INFO] Parâmetros de grade: nx = {nx}, nz = {nz}")
     print(f"b1 => {f["/beamformed_data"].shape}")
     img_beam = np.array(f["/beamformed_data"][()], dtype=np.float32)
     
@@ -161,9 +179,24 @@ if (np.max(x_elem) - np.min(x_elem)) > 0.1:  # heurística: estava em mm
 
 # grade de imagem (CPU primeiro; depois mandamos p/ GPU se houver)
 x_min, x_max = float(x_elem.min()), float(x_elem.max())
-grade_x_cpu = np.linspace(x_min, x_max, nx, dtype=np.float32)
-z_max = c * (t0 + (Nsamples - 1) / fs) / 2.0
-grade_z_cpu = np.linspace(0.0, z_max, nz, dtype=np.float32)
+# z_max = c * (t0 + (Nsamples - 1) / fs) / 2.0
+# Profundidade Fisica em metros
+z_max= Nsamples * c / fs / 2
+
+# Essa fórmula calcula quantos pixels (nx) cabem na largura total (x_max - x_min) 
+# o +1 é utilizado para incluir a borda
+nx = xp.round((x_max - x_min)/tamanho_pixel) + 1 # round => arredondamento para interiro
+nx = int(nx) # converter em inteiro para não dar erro no cupy
+print(f"nx => {nx}")
+# Mesma lógica para profundidade:
+nz = xp.round(z_max/tamanho_pixel) + 1
+nz = int(nz)
+print("nz =", nz)
+
+grade_x_cpu = np.linspace(x_min, x_max +1e-10, nx, dtype=np.float32)
+
+grade_z_cpu = np.linspace(0.0, z_max +1e-10, nz, dtype=np.float32)
+
 
 # apodização por elemento
 apod_cpu = janela_hann(Nelem, backend=np)
@@ -202,7 +235,8 @@ for ia in tqdm(idx_ang, desc="Beamforming (ângulos)"):
     # seno/cosseno do ângulo (em float32 p/ economizar)
     theta = float(ang_rad[ia]) if ia < ang_rad.size else float(ang_rad[0])
     sin_t, cos_t = np.sin(theta), np.cos(theta)
-    sin_t = xp.float32(sin_t); cos_t = xp.float32(cos_t)
+    sin_t = xp.float32(sin_t) 
+    cos_t = xp.float32(cos_t)
 
     # tempo de TX para toda a malha (nz, nx)
     # t_tx(z,x) = (z*cos_t + x*sin_t) / c
@@ -245,10 +279,11 @@ for ia in tqdm(idx_ang, desc="Beamforming (ângulos)"):
     img_complex_total += img_complex
 
 # envelope + log (na GPU se disponível)
-env = xp.abs(img_complex_total)
-env /= (env.max() + 1e-12)
-img_db = 20.0 * xp.log10(env + 1e-12)
-img_db = xp.clip(img_db, -faixa_dB, 0)
+# env = xp.abs(img_complex_total)
+# env /= (env.max() + 1e-12)
+# img_db = 20.0 * xp.log10(env + 1e-12)
+# img_db = xp.clip(img_db, -faixa_dB, 0)
+img_db = 20* np.log10(np.abs(img_complex_total) / np.max(np.abs(img_complex_total)))
 
 # trazer para CPU para plot
 img_db_cpu = to_cpu(img_db)
@@ -268,10 +303,12 @@ print(f"[INFO] imagem original => {img_beam_cpu[0].shape}")
 extent_mm = [grade_x_cpu[0]*1e3, grade_x_cpu[-1]*1e3,
              grade_z_cpu[-1]*1e3, grade_z_cpu[0]*1e3]
 
+img_beam = 20* np.log10(np.abs(img_beam.T) / np.max(np.abs(img_beam)))
+
 # --- Plot ---
 plt.figure(figsize=(6, 8))
 # origin="lower": mostra profundidade aumentando para baixo
-plt.imshow(img_beam.T, cmap="gray", 
+plt.imshow(img_beam, cmap="gray", 
            aspect="auto", vmin=-faixa_dB, vmax=0)
 plt.title("Imagem original: beamformed_data (em dB)")
 plt.xlabel("Lateral (x)")
@@ -279,6 +316,10 @@ plt.ylabel("Profundidade (z)")
 plt.colorbar(label="dB")
 plt.tight_layout()
 plt.show()
+
+# # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
+save_fig(nome_base="Original")
+
 # for angulo in range(75):
 #     plt.imshow(img_beam_cpu[angulo, :, :], cmap='gray', aspect='auto', extent=extent_mm,
 #    vmin=-faixa_dB, vmax=0)
@@ -295,4 +336,8 @@ plt.title(f"B-mode DAS + Compounding ({idx_ang.size} ângulos) [CUDA {'ON' if xp
 plt.colorbar(label="dB")
 plt.tight_layout()
 plt.show()
+
+# # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
+save_fig(nome_base="reconstrucao")
+
 
