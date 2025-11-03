@@ -41,24 +41,33 @@ if hilbert_xp is None:
     # fallback para CPU
     from scipy.signal import hilbert as s_hilbert
     hilbert_xp = s_hilbert
-input("Aperte ENTER para continuar...")
+# input("Aperte ENTER para continuar...")
 #------------------------------------------------------------------------------------
-
+idata = xp.array(arquivo["channel_data"], dtype="float32")
+print(f"IDATA => {idata.shape}")
 # P.angles (nangles,), radianos
 angles = xp.array(arquivo["angles"])
 print(f"ANGLES => {angles.shape}")
 # P.ele_pos (nelems, 3), posições (x,y,z) dos elementos
 ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
-print(f"ELE_POS => {ele_pos.shape}")
-# P.fc, P.fs, P.fdemod, P.c, P.time_zero (arrays/escalares)
+print(f"ELE_POS => {ele_pos}")
 
+
+# P.fc, P.fs, P.fdemod, P.c, P.time_zero (arrays/escalares)
+fc = xp.array(arquivo["modulation_frequency"]).item()
 fs = xp.array(arquivo["sampling_frequency"]).item()
-fdemod = 0
-time_zero = -1 * xp.array(arquivo["time_zero"], dtype="float32")
+c =xp.array(arquivo["sound_speed"]).item()
+fdemod = 1
+
+# [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
+# o -1 faz que o tempo do pulso emitido seja 0
+tempo_zero = -1 * np.array(arquivo["time_zero"], dtype="float32")
+print(f"tempo_zero => {tempo_zero.shape}")
+
 print(f"FC => {fc}")
 print(f"FS => {fs}")
 print(f"FDEMOD => {fdemod}")
-print(f"TIME_ZERO => {time_zero.shape}")
+
 # grid: (ncols, nrows, 3) com (x,y,z) dos pixels (pode ser 2D ou 3D — o código achata).
 
 
@@ -69,8 +78,8 @@ print(f"ang_list => {ang_list}")
 # ele_list: índices de elementos Rx (se None, usa todos).
 ele_list = range(ele_pos.shape[0])
 print(f"ele_list => {ele_list}")
-tamanho_pixel = xp.array(arquivo["pixel_d"]).item()
-print(f"Tamanho pixel => {tamanho_pixel}")
+# tamanho_pixel = xp.array(arquivo["pixel_d"]).item()
+# print(f"Tamanho pixel => {tamanho_pixel}")
 
 #-------------------------------------------------------
 # P = PICMUSData(database_path, acq, target, dtype)
@@ -78,12 +87,28 @@ P = xp.array(arquivo["channel_data"], dtype="float32")
 #-------------------------------------------------------
 # Define pixel grid limits (assume y == 0)
 ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
-xlims = [ele_pos[0, 0], ele_pos[-1, 0]]
+xlims = [ele_pos[0], ele_pos[-1]]
+print(f"XLIMS =>{xlims}")
 # "Eu quero que a imagem de ultrassom comece a 5 mm de profundidade e termine a 55 mm "
 # "de profundidade."
+# Profundidade Fisica em metros
 
-# A imagem não vai mostrar o que está colado no transdutor (de 0 a 5 mm), e também 
-# não vai mostrar nada além de 55 mm de profundidade.
+# profundidade mínima por ângulo (amostra n=0)
+z_start_per_angle = xp.maximum(0.0, (-tempo_zero[0]) * c/2)
+
+# profundidade máxima por ângulo (amostra n=Ns-1)
+z_end_per_angle = (((idata[2] - 1) / fs) - tempo_zero[0]) * (c/2)
+
+# intervalo comum a todos os ângulos
+zmin = float(xp.max(z_start_per_angle))
+zmax = float(xp.min(z_end_per_angle))
+
+# limites da profondidade
+zlims = (zmin, zmax)
+print("zlims (m) =", zlims[1])
+
+
+
 
 #-------------------------------------------------------
 # calculo do pixel
@@ -100,8 +125,79 @@ wvln = c / fc #comprimento da onda
 dx = wvln / 3 #largura do pixel
 # o código está simplesmente garantindo que os pixels sejam quadrados
 dz = dx  # Use square pixels
+print(f"DZ => {dz}")
 #-------------------------------------------------------
+tamanho_pixel = xp.array(arquivo["pixel_d"]).item()
+print(f"Tamanho pixel => {tamanho_pixel}")
+# grid = make_pixel_grid(xlims, zlims, dx, dz)
+# fnum = 1
 
-grid = make_pixel_grid(xlims, zlims, dx, dz)
-fnum = 1
+eps = 1e-10
+# A imagem não vai mostrar o que está colado no transdutor (de 0 a 5 mm), e também 
+# não vai mostrar nada além de 55 mm de profundidade.
+x = xp.arange(xlims[0], xlims[-1] + eps, dx)
+print(f"X => {x.shape}")
+z = xp.arange(zlims[1], zlims[0] + eps, dz)
+print(f"Z => {z.shape}")
+zz, xx = xp.meshgrid(z, x, indexing="ij")
+print(f"ZZ => {zz.shape}")
+print(f"XX => {xx.shape}")
+yy = 0 * xx
+grid = xp.stack((xx, yy, zz), axis=-1)
+print(f"GRID => {grid.shape}")
 
+
+qdata = xp.imag(hilbert_xp(idata, axis=-1))
+print(f"IDATA => {idata.shape}")
+print(f"QDATA => {qdata.shape}")
+rf_complexo = (idata,qdata)
+# print(f"RF complexo = > {rf_complexo}")
+
+# Convert grid to tensor
+grid = xp.reshape(grid, (-1, 3))
+out_shape = grid.shape[:-1]
+print(f"GRID RESHAPE => {grid.shape}")
+print(f"out_shaoe=> {out_shape}")
+ # o 0 e o 2 porque são as colunas x e z ...a y não interessa...o ultimo zero faz broadcasting
+
+def calcula_distancia(grid, angles): #TX
+    x_pixels = np.expand_dims(grid[:, 0], 0)
+    z_pixels = np.expand_dims(grid[:, 2], 0)
+    # print(f"AX => {x_pixels.shape}")
+    # print(f"AZ => {z_pixels.shape}")
+    distancia = x_pixels * xp.sin(angles) + z_pixels * xp.cos(angles)
+    return distancia
+
+def apod_plane(grid, angles, xlims):
+    pix = xp.expand_dims(grid, 0)
+    ang = xp.reshape(angles, (-1, 1, 1))
+    # Project pixels back to aperture along the defined angles
+    x_proj = pix[:, :, 0] - pix[:, :, 2] * np.tan(ang)
+    # Select only pixels whose projection lie within the aperture, with fudge factor
+    mask = (x_proj >= xlims[0] * 1.2) & (x_proj <= xlims[1] * 1.2)
+    # Convert to float and normalize across angles (i.e., delay-and-"average")
+    apod = xp.array(mask, dtype="float32")
+    # Output has shape [nangles, npixels]
+    return apod
+
+
+ # Compute delays in meters
+nangles = len(ang_list)
+nelems = len(ele_list)
+npixels = grid.shape[0]
+
+# Initialize delays, apodizations, output array
+txdel = xp.zeros((nangles, npixels), dtype="float")
+rxdel = xp.zeros((nelems, npixels), dtype="float")
+
+# o apodizado muda os 1 para o quando fora do feixe
+txapo = xp.ones((nangles, npixels), dtype="float")
+rxapo = xp.ones((nelems, npixels), dtype="float")
+
+
+# Compute transmit and receive delays and apodizations
+for i, tx in enumerate(ang_list):
+    txdel[i] = calcula_distancia(grid, angles[tx])
+    txdel[i] += tempo_zero[tx] * c
+    txapo[i] = apod_plane(grid, angles[tx], xlims)
+print(f"TX DEL => {txdel.shape}")

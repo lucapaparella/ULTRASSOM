@@ -93,7 +93,7 @@ print(f"Tamanho pixel => {tamanho_pixel}")
 # [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
 # o -1 faz que o tempo do pulso emitido seja 0
 tempo_zero = -1 * np.array(arquivo["time_zero"], dtype="float32")
-print(f"tempo_zero => {tempo_zero.shape}")
+print(f"tempo_zero => {tempo_zero}")
 
 fdemod = 0
 
