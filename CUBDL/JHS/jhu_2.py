@@ -48,11 +48,14 @@ print(f"IDATA => {idata.shape}")
 # P.angles (nangles,), radianos
 angles = xp.array(arquivo["angles"])
 print(f"ANGLES => {angles.shape}")
+
 # P.ele_pos (nelems, 3), posições (x,y,z) dos elementos
 ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
-print(f"ELE_POS => {ele_pos}")
 
 
+
+pitch = xp.array(arquivo["pitch"]).item()
+print(f"pitch => {pitch}")
 # P.fc, P.fs, P.fdemod, P.c, P.time_zero (arrays/escalares)
 fc = xp.array(arquivo["modulation_frequency"]).item()
 fs = xp.array(arquivo["sampling_frequency"]).item()
@@ -61,7 +64,7 @@ fdemod = 1
 
 # [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
 # o -1 faz que o tempo do pulso emitido seja 0
-tempo_zero = -1 * np.array(arquivo["time_zero"], dtype="float32")
+tempo_zero =xp.array(arquivo["time_zero"], dtype="float32")
 print(f"tempo_zero => {tempo_zero.shape}")
 
 print(f"FC => {fc}")
@@ -86,7 +89,7 @@ print(f"ele_list => {ele_list}")
 P = xp.array(arquivo["channel_data"], dtype="float32")
 #-------------------------------------------------------
 # Define pixel grid limits (assume y == 0)
-ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
+# ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
 xlims = [ele_pos[0], ele_pos[-1]]
 print(f"XLIMS =>{xlims}")
 # "Eu quero que a imagem de ultrassom comece a 5 mm de profundidade e termine a 55 mm "
@@ -122,15 +125,17 @@ wvln = c / fc #comprimento da onda
 # Para reconstruir digitalmente uma onda sem perder informação, 
 # você precisa de pelo menos 2 amostras (pixels) por comprimento de onda. 
 # sar 3 (como em wvln / 3) é mais seguro e garante uma imagem de melhor qualidade.
-dx = wvln / 3 #largura do pixel
+# dx = wvln / 3 #largura do pixel
 # o código está simplesmente garantindo que os pixels sejam quadrados
-dz = dx  # Use square pixels
-print(f"DZ => {dz}")
+# dz = dx  # Use square pixels
+# print(f"DZ => {dz}")
 #-------------------------------------------------------
 tamanho_pixel = xp.array(arquivo["pixel_d"]).item()
 print(f"Tamanho pixel => {tamanho_pixel}")
+dx = tamanho_pixel
+dz = dx
 # grid = make_pixel_grid(xlims, zlims, dx, dz)
-# fnum = 1
+fnum = 1
 
 eps = 1e-10
 # A imagem não vai mostrar o que está colado no transdutor (de 0 a 5 mm), e também 
@@ -195,9 +200,138 @@ txapo = xp.ones((nangles, npixels), dtype="float")
 rxapo = xp.ones((nelems, npixels), dtype="float")
 
 
+ele_pos = xp.stack([ele_pos, xp.zeros_like(ele_pos), xp.zeros_like(ele_pos)], axis=1)
+print(f"ELE_POS => {ele_pos.shape}")
+
 # Compute transmit and receive delays and apodizations
 for i, tx in enumerate(ang_list):
     txdel[i] = calcula_distancia(grid, angles[tx])
     txdel[i] += tempo_zero[tx] * c
     txapo[i] = apod_plane(grid, angles[tx], xlims)
 print(f"TX DEL => {txdel.shape}")
+print(f"TX APO => {txapo.shape}")
+
+def apod_focus(grid, ele_pos, fnum=1, min_width=1e-3):
+    # Get vector between elements and pixels via broadcasting
+    ppos = xp.expand_dims(grid, axis=0)
+    epos = xp.reshape(ele_pos, (-1, 1, 3))
+
+    v = ppos - epos
+    # Select (ele,pix) pairs whose effective fnum is greater than fnum
+    mask = xp.abs(v[:, :, 2] / (v[:, :, 0] + 1e-30)) > fnum
+    mask = mask | (xp.abs(v[:, :, 0]) <= min_width)
+    # Also account for edges of aperture
+    mask = mask | ((v[:, :, 0] >= min_width) & (ppos[:, :, 0] <= epos[0, 0, 0]))
+    mask = mask | ((v[:, :, 0] <= -min_width) & (ppos[:, :, 0] >= epos[-1, 0, 0]))
+    # Convert to float and normalize across elements (i.e., delay-and-"average")
+    apod = xp.array(mask, dtype="float32")
+    # Output has shape [nelems, npixels]
+    return apod
+
+def delay_focus(grid, ele_pos):
+    # Get norm of distance vector between elements and pixels via broadcasting
+    dist = xp.linalg.norm(grid - xp.expand_dims(ele_pos, 0), axis=-1)
+    return dist
+
+for j, rx in enumerate(ele_list):
+    rxdel[j] = delay_focus(grid, ele_pos[rx])
+    rxapo[j] = apod_focus(grid, ele_pos[rx])
+
+print(f"RX DEL => {rxdel.shape}")
+print(f"RX APO => {rxapo.shape}")
+
+ # Converter em amostras
+txdel *= fs / c
+rxdel *= fs / c
+
+# Initialize the output array
+idas = xp.zeros(npixels, dtype="float")
+qdas = xp.zeros(npixels, dtype="float")
+for t, td, ta in tqdm(zip(ang_list, txdel, txapo),
+                      total=len(ang_list),
+                      desc="Beamforming TX angles"):
+    for r, rd, ra in zip(ele_list, rxdel, rxapo):
+        # Dados IQ do disparo t e elemento r
+        i_chan = idata[t, r]   # (Nsamples,)
+        q_chan = qdata[t, r]
+
+        # Soma dos atrasos (índices fracionários)
+        delays = td + rd       # (Npixels,)
+
+        # Interpolação linear 1D
+        samples = xp.arange(i_chan.size)
+        ifoc = xp.interp(delays, samples, i_chan, left=0.0, right=0.0)
+        qfoc = xp.interp(delays, samples, q_chan, left=0.0, right=0.0)
+
+        # Rotação de fase (caso demodulada)
+        if fdemod != 0:
+            tshift = delays / fs - grid[:, 2] * 2 / c
+            theta = 2 * xp.pi * fdemod * tshift
+            cos_t, sin_t = xp.cos(theta), xp.sin(theta)
+            ifoc, qfoc = ifoc * cos_t - qfoc * sin_t, ifoc * sin_t + qfoc * cos_t
+
+        # Apodização TX × RX e soma
+        apods = ta * ra
+        idas += ifoc * apods
+        qdas += qfoc * apods
+
+# helper para converter CuPy→NumPy (ou deixar como está se já for NumPy)
+to_np = (lambda a: a.get()) if xp.__name__ == "cupy" else (lambda a: np.asarray(a))
+
+# --- depois do loop de beamforming ---
+idas = to_np(idas)
+qdas = to_np(qdas)
+
+# sinal complexo e imagem (em 2D!)
+iq = idas + 1j * qdas
+
+# você gerou x, z e meshgrid (zz, xx) antes:
+nx = int(x.shape[0])      # número de colunas (lateral)
+nz = int(z.shape[0])      # número de linhas (profundidade)
+
+# iq veio de grid achatado -> reshape para (nz, nx)
+bimg = np.abs(iq).reshape(nz, nx)
+
+
+# log-compress  (uma vez só) + normalização
+# bimg = bimg / (bimg.max() + 1e-12)
+# bimg_db = 20 * np.log10(bimg + 1e-12)
+# bimg_db = xp.clip(bimg_db, -60, 0)   # janela dinâmica opcional
+bimg_db = 10* np.log10(np.abs(bimg.T) / np.max(np.abs(bimg)))
+# extent (tudo em NumPy/CPU)
+x_cpu = to_np(x)
+z_cpu = to_np(z)
+xmin, xmax = float(x_cpu.min()), float(x_cpu.max())
+zmin, zmax = float(z_cpu.min()), float(z_cpu.max())
+
+# origin='upper' → use [xmin, xmax, zmax, zmin] para profundidade “pra baixo”
+extent = [xmin*1e3, xmax*1e3,zmin*1e3,zmax*1e3]
+
+plt.figure(figsize=(6, 8))
+plt.imshow(bimg_db, cmap="gray", origin="upper", aspect="auto", extent=extent)
+plt.title("Imagem B-mode")
+plt.xlabel("Lateral")
+plt.ylabel("Profundidade")
+plt.show()
+
+#salvar arquivo
+def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS_SALVAS", dpi=200):
+    """Salva a figura atual em ./IMAGENS_SALVAS/<nome_base>[_N].png e imprime o caminho."""
+    fig = fig or plt.gcf()
+    Path(pasta).mkdir(parents=True, exist_ok=True)
+    i = 0
+    while True:
+        sufixo = "" if i == 0 else f"_{i}"
+        path = Path(pasta) / f"{nome_base}{sufixo}.png"
+        if not path.exists():
+            break
+        i += 1
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    print(f"[OK] Figura salva em: {path}")
+
+
+# # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
+save_fig(nome_base="reconstrucao")
+
+
+

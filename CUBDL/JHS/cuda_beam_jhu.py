@@ -99,7 +99,7 @@ fdemod = 0
 
 # Transforma o dataset em uma lista de posições dos elementos (128,) => (128, 3) com [x, y, z] ????????
 posicoes_elementos = xp.array(arquivo["element_positions"], dtype="float32")
-print(f"posicoes_elementos => {posicoes_elementos.shape}")
+print(f"posicoes_elementos => {posicoes_elementos}")
 # print(f"posicoes_elementos => {posicoes_elementos}")
 # ele_pos = np.stack([posicoes_elementos, 0 * posicoes_elementos, 0 * posicoes_elementos], axis=1)
 # print(f"ele_pos=> {ele_pos.shape}")
