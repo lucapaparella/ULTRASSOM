@@ -8,7 +8,7 @@ import os, matplotlib
 # matplotlib.use("Agg")     # sem X11 → salva em arquivo
 
 #limpar a tela
-os.system("cls")
+os.system("clear")
 
 # Caminho do arquivo
 path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/JHU030.hdf5"
@@ -45,14 +45,21 @@ if hilbert_xp is None:
 #------------------------------------------------------------------------------------
 idata = xp.array(arquivo["channel_data"], dtype="float32")
 print(f"IDATA => {idata.shape}")
+
+print(f"IMAGEM ORIGINAL=> {arquivo["/beamformed_data"].shape}")
+
 # P.angles (nangles,), radianos
 angles = xp.array(arquivo["angles"])
 print(f"ANGLES => {angles.shape}")
 
 # P.ele_pos (nelems, 3), posições (x,y,z) dos elementos
 ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
-
-
+ele_pos = xp.stack([ele_pos, xp.zeros_like(ele_pos), xp.zeros_like(ele_pos)], axis=1)
+print(f"ELE_POS => {ele_pos.shape}")
+# teste
+# teste_xlims = np.zeros((3, 3), dtype="float32")
+teste_xlims = [ele_pos[0, 0].item(), ele_pos[-1, 0].item()]
+print(f"TESTE XLIMS => {teste_xlims}")
 
 pitch = xp.array(arquivo["pitch"]).item()
 print(f"pitch => {pitch}")
@@ -64,7 +71,7 @@ fdemod = 1
 
 # [Gravação começa] ----(ex.: espera 2 µs)---- [Pulso é emitido] ---- ecos retornam ---->
 # o -1 faz que o tempo do pulso emitido seja 0
-tempo_zero =xp.array(arquivo["time_zero"], dtype="float32")
+tempo_zero =-1*xp.array(arquivo["time_zero"], dtype="float32")
 print(f"tempo_zero => {tempo_zero.shape}")
 
 print(f"FC => {fc}")
@@ -90,14 +97,14 @@ P = xp.array(arquivo["channel_data"], dtype="float32")
 #-------------------------------------------------------
 # Define pixel grid limits (assume y == 0)
 # ele_pos = xp.array(arquivo["element_positions"], dtype="float32")
-xlims = [ele_pos[0], ele_pos[-1]]
+xlims = [ele_pos[0, 0].item(), ele_pos[-1, 0].item()]
 print(f"XLIMS =>{xlims}")
 # "Eu quero que a imagem de ultrassom comece a 5 mm de profundidade e termine a 55 mm "
 # "de profundidade."
 # Profundidade Fisica em metros
 
 # profundidade mínima por ângulo (amostra n=0)
-z_start_per_angle = xp.maximum(0.0, (-tempo_zero[0]) * c/2)
+z_start_per_angle = xp.maximum(0.0, -tempo_zero[0]) * (c/2)
 
 # profundidade máxima por ângulo (amostra n=Ns-1)
 z_end_per_angle = (((idata[2] - 1) / fs) - tempo_zero[0]) * (c/2)
@@ -105,7 +112,8 @@ z_end_per_angle = (((idata[2] - 1) / fs) - tempo_zero[0]) * (c/2)
 # intervalo comum a todos os ângulos
 zmin = float(xp.max(z_start_per_angle))
 zmax = float(xp.min(z_end_per_angle))
-
+print(f"ZMIN => {zmin}")
+print(f"ZMAX => {zmax}")
 # limites da profondidade
 zlims = (zmin, zmax)
 print("zlims (m) =", zlims[1])
@@ -142,7 +150,7 @@ eps = 1e-10
 # não vai mostrar nada além de 55 mm de profundidade.
 x = xp.arange(xlims[0], xlims[-1] + eps, dx)
 print(f"X => {x.shape}")
-z = xp.arange(zlims[1], zlims[0] + eps, dz)
+z = xp.arange(zlims[0], zlims[1] + dz/2, dz)
 print(f"Z => {z.shape}")
 zz, xx = xp.meshgrid(z, x, indexing="ij")
 print(f"ZZ => {zz.shape}")
@@ -200,8 +208,7 @@ txapo = xp.ones((nangles, npixels), dtype="float")
 rxapo = xp.ones((nelems, npixels), dtype="float")
 
 
-ele_pos = xp.stack([ele_pos, xp.zeros_like(ele_pos), xp.zeros_like(ele_pos)], axis=1)
-print(f"ELE_POS => {ele_pos.shape}")
+
 
 # Compute transmit and receive delays and apodizations
 for i, tx in enumerate(ang_list):
@@ -297,7 +304,13 @@ bimg = np.abs(iq).reshape(nz, nx)
 # bimg = bimg / (bimg.max() + 1e-12)
 # bimg_db = 20 * np.log10(bimg + 1e-12)
 # bimg_db = xp.clip(bimg_db, -60, 0)   # janela dinâmica opcional
-bimg_db = 10* np.log10(np.abs(bimg.T) / np.max(np.abs(bimg)))
+# bimg_db = 10* np.log10(np.abs(bimg.T) / np.max(np.abs(bimg)))
+
+bimg /= (bimg.max() + 1e-12)
+bimg_db = 20*np.log10(bimg + 1e-12)  # ou 10*log10(power)
+
+
+print(f"BIM DB => {bimg_db.shape}")
 # extent (tudo em NumPy/CPU)
 x_cpu = to_np(x)
 z_cpu = to_np(z)
