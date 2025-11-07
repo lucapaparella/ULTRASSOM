@@ -116,7 +116,7 @@ print(f"ZMIN => {zmin}")
 print(f"ZMAX => {zmax}")
 # limites da profondidade
 zlims = (zmin, zmax)
-print("zlims (m) =", zlims[1])
+print("zlims (m) =", zlims)
 
 
 
@@ -150,14 +150,17 @@ eps = 1e-10
 # não vai mostrar nada além de 55 mm de profundidade.
 x = xp.arange(xlims[0], xlims[-1] + eps, dx)
 print(f"X => {x.shape}")
-z = xp.arange(zlims[0], zlims[1] + dz/2, dz)
+# z = xp.arange(zlims[0], zlims[1] + eps, dz)
+z = xp.arange(zmax, zmin + eps, dz)
 print(f"Z => {z.shape}")
+
 zz, xx = xp.meshgrid(z, x, indexing="ij")
 print(f"ZZ => {zz.shape}")
 print(f"XX => {xx.shape}")
 yy = 0 * xx
 grid = xp.stack((xx, yy, zz), axis=-1)
 print(f"GRID => {grid.shape}")
+
 
 
 qdata = xp.imag(hilbert_xp(idata, axis=-1))
