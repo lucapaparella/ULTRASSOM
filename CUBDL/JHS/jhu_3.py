@@ -44,6 +44,7 @@ if hilbert_xp is None:
 # input("Aperte ENTER para continuar...")
 # Get data
 idata = xp.array(arquivo["channel_data"], dtype="float32")
+print(f"idata => {idata.shape}")
 qdata = xp.imag(hilbert_xp(idata, axis=-1))
 angles = xp.array(arquivo["angles"])
 fc = xp.array(arquivo["modulation_frequency"]).item()
@@ -70,6 +71,7 @@ fnum = 1
 
 # OUTPUTS
 # grid    Pixel grid of size (nx, nz, 3)
+# eps vem de epsilon, Ele é usado para evitar erros de arredondamento nas funções arange.
 eps = 1e-10
 x = xp.arange(xlims[0], xlims[1] + eps, dx)
 z = xp.arange(zlims[0], zlims[1] + eps, dz)
