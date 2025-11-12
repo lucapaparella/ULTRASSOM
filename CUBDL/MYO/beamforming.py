@@ -11,7 +11,7 @@ import os, matplotlib
 os.system("clear")
 
 # Caminho do arquivo
-path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/INS019.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/MYO005.hdf5"
 # Abrindo o arquivo
 
 arquivo = h5py.File(path, "r")
@@ -73,56 +73,54 @@ if hilbert_xp is None:
     hilbert_xp = s_hilbert
 
 # --------- FIM Backend: CUDA (CuPy) se disponível; caso contrário NumPy ----------
+
+
 idata = xp.array(arquivo["channel_data"], dtype="float32")
-print(f"idata => {idata.shape}")
-# Essa função calcula a Transformada de Hilbert ao longo do último eixo
-# xp.imag() extrai somente a parte imaginária do sinal complexo retornado pela Hilbert.
 qdata = xp.imag(hilbert_xp(idata, axis=-1))
+print(f"idata => {idata.shape}")
 print(f"qdata => {qdata.shape}")
 
-# Os angulos não estão nos datasetspor isso devem ser calculados
-# gera 75 ângulos de -16° até +16°, igualmente distribuídos.
-# e Converte os ângulos de graus para radianos
-angles = xp.linspace(-16, 16, idata.shape[0]) * xp.pi / 180
-print(f"angles => {angles.shape}")
-# .item() serve para extrair o valor escalar: de fc => [[5.208e+06]] para fc => 5208000.0
+angles = xp.array(arquivo["angles"])
 fc = xp.array(arquivo["modulation_frequency"]).item()
-print(f"fc => {fc}")
+
 fs = xp.array(arquivo["sampling_frequency"]).item()
+print(f"fs => {fs}")
+
+
 c = xp.array(arquivo["sound_speed"]).item()
 print(f"c => {c}")
-c = 1469.00
-
-time_zero = -1 * xp.array(arquivo["start_time"], dtype="float32")[0] # [0] retira a primeira dimensão
-print(f"start_time => {time_zero.shape}")
-
-# de (3,128) para (128,3) com .T
-ele_pos = xp.array(arquivo["element_positions"], dtype="float32").T
-
-# Centralizar as posições em 0
-ele_pos[:, 0] -= xp.mean(ele_pos[:, 0])
+# c = 1580.0
+# Make the element positions based on L11-4v geometry
+# o datasets não fornece as posições dos elementos
+# eles precisame ser calculados usando um pitch padrão 
+pitch = 0.3e-3
+nelems = idata.shape[1]
+print(f"nelems => {nelems}")
+xpos = xp.arange(nelems) * pitch
+xpos -= xp.mean(xpos)
+ele_pos = xp.stack([xpos, 0 * xpos, 0 * xpos], axis=1)
 print(f"ele_pos => {ele_pos.shape}")
-print(f"ele_mean => {xp.mean(ele_pos[:, 0])}")
-
-# Em datasets onde o tempo zero foi definido no centro do transdutor,
-# precisamos ajustar o tempo de cada ângulo, porque os feixes inclinados
-for i, a in enumerate(angles):
-    time_zero[i] += ele_pos[-1, 0] * xp.abs(np.sin(a)) / c
-print(f"time_zero => {time_zero.shape}")
-
-pixel_positions = np.array(arquivo["pixel_positions"], dtype="float32")
-print(f"pixel_positions => {pixel_positions.shape}")
 
 fdemod = 0
 
-zlims = xp.array([8e-3, idata.shape[2] * c / fs / 2])
+# O time_zero não é fornecido, portanto precisa calcular
+time_zero = xp.zeros((len(angles),), dtype="float32")
+
+for i, a in enumerate(angles):
+    time_zero[i] = -1*ele_pos[-1, 0] * np.abs(np.sin(a)) / c
+
+print(f"time_zero => {time_zero.shape}")
+
+# zlims = xp.array([0e-3, idata.shape[2] * c / fs / 2])
+zlims = [5e-3, 55e-3]
+
 print(f"zlims => {zlims}")
 xlims = xp.array([ele_pos[0, 0], ele_pos[-1, 0]])
 print(f"xlims => {xlims}")
 
 # Define pixel grid limits (assume y == 0)
 wvln = c / fc
-dx = wvln / 4
+dx = wvln / 2.5
 print(f"dx => {dx}")
 dz = dx  # Use square pixels
 # grid = make_pixel_grid(xlims, zlims, dx, dz)
@@ -141,7 +139,6 @@ print(f"grid => {grid.shape}")
 grid = xp.reshape(grid, (-1, 3))
 out_shape = grid.shape[:-1]
 
-
 ang_list = range(angles.shape[0])
 print(f"ang_list => {ang_list}")
 
@@ -154,8 +151,7 @@ nelems = len(ele_list)
 print(f"nelems => {nelems}")
 npixels = grid.shape[0]
 print(f"npixels => {npixels}")
-# xlims_1 = (ele_pos[0, 0], ele_pos[-1, 0])  # Aperture width
-# print(f"xlims_1 => {xlims_1}")
+
 
 # Initialize delays, apodizations, output array
 txdel = xp.zeros((nangles, npixels), dtype="float32")
@@ -254,6 +250,7 @@ rxdel *= fs / c
 # Initialize the output array
 idas = xp.zeros(npixels, dtype="float")
 qdas = xp.zeros(npixels, dtype="float")
+
 for t, td, ta in tqdm(zip(ang_list, txdel, txapo),
                       total=len(ang_list),
                       desc="Beamforming TX angles"):
@@ -309,11 +306,19 @@ bimg = np.abs(iq).reshape(nz, nx)
 
 bimg /= (bimg.max() + 1e-12)
 bimg_db = 20*np.log10(bimg + 1e-12)  # ou 10*log10(power)
-
+bimg_db = np.clip(bimg_db, -50, 0)
 
 print(f"BIM DB => {bimg_db.shape}")
 
+#------------------------------------------------------------------------
 
+nx, nz = len(x), len(z)
+Lx = float(x.max()-x.min())   # m
+Lz = float(z.max()-z.min())   # m
+print(f"nx={nx}, nz={nz},  Lx={Lx*1e3:.1f} mm, Lz={Lz*1e3:.1f} mm,  aspect_phys={Lx/Lz:.3f}")
+
+assert bimg.shape == (nz, nx), f"bimg {bimg.shape} != (nz,nx)=({nz},{nx})"
+#------------------------------------------------------------------------
 
 # extent (tudo em NumPy/CPU)
 x_cpu = to_np(x)
@@ -329,6 +334,7 @@ plt.imshow(bimg_db, cmap="gray", origin="upper", aspect="auto", extent=extent)
 plt.title("Imagem B-mode")
 plt.xlabel("Lateral")
 plt.ylabel("Profundidade")
+plt.colorbar(label='dB')
 plt.show()
 
 #salvar arquivo
@@ -349,18 +355,3 @@ def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS_SALVAS", dpi=200
 
 # # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
 save_fig(nome_base="reconstrucao")
-
-img_original = np.array(arquivo["beamformed_data"], dtype="float32")
-print(f"img_original => {img_original.shape}")
-# img = arquivo["/beamformed_data"][:]
-# print(f"img => {img.shape}")
-img_original = np.mean(img_original, axis=0)
-img_original_db = 10 * np.log10(np.abs(img_original) / np.max(np.abs(img_original)) + 1e-6)
-print(f"IM DB => {img_original_db.shape}")
-plt.figure(figsize=(6, 8))
-plt.imshow(img_original_db.T, cmap="gray", origin="upper", aspect="auto", extent=extent)
-plt.title("Imagem B-mode")
-plt.xlabel("Lateral")
-plt.ylabel("Profundidade")
-plt.show()
-save_fig(nome_base="original")
