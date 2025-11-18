@@ -8,7 +8,7 @@ from pathlib import Path
 os.system("clear")
 
 # Caminho do arquivo HDF5
-path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/MYO005.hdf5"
+path = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/MYO001.hdf5"
 
 # Abre o arquivo
 with h5py.File(path, "r") as f:

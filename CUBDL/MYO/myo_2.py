@@ -77,29 +77,32 @@ if hilbert_xp is None:
 
 idata = xp.array(arquivo["channel_data"], dtype="float32")
 qdata = xp.imag(hilbert_xp(idata, axis=-1))
-print(f"idata => {idata.shape}")
-print(f"qdata => {qdata.shape}")
+# print(f"idata => {idata.shape}")
+# print(f"qdata => {qdata.shape}")
 
 angles = xp.array(arquivo["angles"])
+print(f"angles => {angles[[0]]}")
+
 fc = xp.array(arquivo["modulation_frequency"]).item()
 
 fs = xp.array(arquivo["sampling_frequency"]).item()
-print(f"fs => {fs}")
+# print(f"fs => {fs}")
 
 
 c = xp.array(arquivo["sound_speed"]).item()
-print(f"c => {c}")
-c = 1562.0
+# print(f"c => {c}")
+# c = 1580
+
 # Make the element positions based on L11-4v geometry
 # o datasets não fornece as posições dos elementos
 # eles precisame ser calculados usando um pitch padrão 
 pitch = 0.3e-3
 nelems = idata.shape[1]
-print(f"nelems => {nelems}")
+# print(f"nelems => {nelems}")
 xpos = xp.arange(nelems) * pitch
 xpos -= xp.mean(xpos)
 ele_pos = xp.stack([xpos, 0 * xpos, 0 * xpos], axis=1)
-print(f"ele_pos => {ele_pos.shape}")
+# print(f"ele_pos => {ele_pos.shape}")
 
 fdemod = 0
 
@@ -109,53 +112,64 @@ time_zero = xp.zeros((len(angles),), dtype="float32")
 for i, a in enumerate(angles):
     time_zero[i] = -1*ele_pos[-1, 0] * np.abs(np.sin(a)) / c
 
-print(f"time_zero => {time_zero.shape}")
-
-# zlims = xp.array([0e-3, idata.shape[2] * c / fs / 2])
-zlims = [5e-3, 55e-3]
-
-print(f"zlims => {zlims}")
+# print(f"time_zero => {time_zero.shape}")
 xlims = xp.array([ele_pos[0, 0], ele_pos[-1, 0]])
-print(f"xlims => {xlims}")
+# zlims = xp.array([0e-3, idata.shape[2] * c / fs / 2])
+zlims = [5e-3, 50e-3]
+
+# print(f"zlims => {zlims}")
+# print(f"xlims => {xlims}")
 
 # Define pixel grid limits (assume y == 0)
 wvln = c / fc
-dx = wvln / 3
-print(f"dx => {dx}")
+dx = wvln / 2.5
+# print(f"dx => {dx}")
 dz = dx  # Use square pixels
-# grid = make_pixel_grid(xlims, zlims, dx, dz)
-fnum = 1
 
+# grid = make_pixel_grid(xlims, zlims, dx, dz)
 eps = 1e-10
 # eps vem de epsilon, Ele é usado para evitar erros de arredondamento nas funções arange.
 x = xp.arange(xlims[0], xlims[1] + eps, dx)
 z = xp.arange(zlims[0], zlims[1] + eps, dz)
+
+
 zz, xx = xp.meshgrid(z, x, indexing="ij")
 yy = 0 * xx
 grid = xp.stack((xx, yy, zz), axis=-1)
 print(f"grid => {grid.shape}")
 
+fnum = 1
+
+
+
+ang_list = range(angles.shape[0])
+# print(f"ang_list => {ang_list}")
+
+
+
 out_shape = grid.shape[:-1]
-print(f"out_shape => {out_shape}")
+# print(f"out_shape => {out_shape}")
 
 # grid = xp.constant(grid, dtype=xp.float32)
 grid = xp.reshape(grid, (-1, 3))
 print(f"grid reshape => {grid.shape}")
 
+# nx, nz = grid.shape[:2]
+# print(f"nx = > {nx}")
+# print(f"nz = > {nz}")
 
 
-ang_list = range(angles.shape[0])
-print(f"ang_list => {ang_list}")
+
 
 ele_list = range(ele_pos.shape[0])
-print(f"ele_list => {ele_list}")
+# print(f"ele_list => {ele_list}")
 
 nangles = len(ang_list)
-print(f"nangles => {nangles}")
+# print(f"nangles => {nangles}")
 nelems = len(ele_list)
-print(f"nelems => {nelems}")
+# print(f"nelems => {nelems}")
 npixels = grid.shape[0]
-print(f"npixels => {npixels}")
+# print(f"npixels => {npixels}")
 
 
 # Initialize delays, apodizations, output array
@@ -239,7 +253,7 @@ def apod_focus(grid, ele_pos, fnum=1, min_width=1e-3):
 
 
 for j, rx in enumerate(ele_list):
-    rxdel[j] = delay_focus(grid, ele_pos[[rx]])
+    rxdel[j] = delay_focus(grid, ele_pos[rx])
     rxapo[j] = apod_focus(grid, ele_pos[rx])
 
 print(f"rxdel => {rxdel.shape}")
@@ -304,51 +318,149 @@ def apply_delays(iq, d):
 
 iqdata = xp.stack((idata, qdata), axis=-1)
 # print(f"iqdata => {iqdata.shape}")
+
 # Initialize the output array
 idas = xp.zeros(npixels, dtype="float")
 qdas = xp.zeros(npixels, dtype="float")
 
+#___________________________________________________________
+
+import numpy as np  # só para usar como default; com CuPy passe xp=cp
+
+def grid_sample_xp(input, grid, align_corners=False):
+    """
+    Aproxima torch.nn.functional.grid_sample (modo bilinear, padding zeros).
+
+    Espera:
+        input: (N, C, H, W)
+        grid:  (N, H_out, W_out, 2), com:
+               grid[..., 0] = x normalizado em [-1,1]  -> eixo W (colunas)
+               grid[..., 1] = y normalizado em [-1,1]  -> eixo H (linhas)
+
+    Retorna:
+        out: (N, C, H_out, W_out)
+    """
+    # Shapes de entrada
+    N, C, H, W = input.shape
+    Ng, H_out, W_out, two = grid.shape
+    assert Ng == N,  "grid e input devem ter o mesmo N"
+    assert two == 2, "última dimensão de grid deve ser 2 (x,y)"
+
+    # Separa coordenadas normalizadas
+    x = grid[..., 0]  # (N, H_out, W_out)
+    y = grid[..., 1]  # (N, H_out, W_out)
+
+    # Converte de coordenadas normalizadas [-1,1] para índice de pixel [0, W-1] e [0, H-1]
+    if align_corners:
+        ix = (x + 1) * (W - 1) / 2.0
+        iy = (y + 1) * (H - 1) / 2.0
+    else:
+        ix = (x + 1) * W / 2.0 - 0.5
+        iy = (y + 1) * H / 2.0 - 0.5
+
+    # Índices inteiros dos 4 vizinhos
+    ix0 = xp.floor(ix).astype(xp.int64)
+    iy0 = xp.floor(iy).astype(xp.int64)
+    ix1 = ix0 + 1
+    iy1 = iy0 + 1
+
+    # Máscaras de pontos dentro da imagem (para padding zero)
+    inside_x0 = (ix0 >= 0) & (ix0 < W)
+    inside_x1 = (ix1 >= 0) & (ix1 < W)
+    inside_y0 = (iy0 >= 0) & (iy0 < H)
+    inside_y1 = (iy1 >= 0) & (iy1 < H)
+
+    # Clampa índices para garantir que estão em [0, W-1] e [0, H-1]
+    ix0_cl = xp.clip(ix0, 0, W - 1)
+    ix1_cl = xp.clip(ix1, 0, W - 1)
+    iy0_cl = xp.clip(iy0, 0, H - 1)
+    iy1_cl = xp.clip(iy1, 0, H - 1)
+
+    # Distâncias fracionárias para pesos bilineares
+    wx1 = ix - ix0.astype(ix.dtype)  # distância até x1
+    wx0 = 1.0 - wx1                  # distância até x0
+    wy1 = iy - iy0.astype(iy.dtype)  # distância até y1
+    wy0 = 1.0 - wy1                  # distância até y0
+
+    # Pesos 2D (N, H_out, W_out)
+    wa = wx0 * wy0  # (x0, y0)
+    wb = wx1 * wy0  # (x1, y0)
+    wc = wx0 * wy1  # (x0, y1)
+    wd = wx1 * wy1  # (x1, y1)
+
+    # Zera pesos onde o índice sai da imagem (padding zeros)
+    wa *= inside_x0 & inside_y0
+    wb *= inside_x1 & inside_y0
+    wc *= inside_x0 & inside_y1
+    wd *= inside_x1 & inside_y1
+
+    # Índices de batch: (N,1,1) para broadcast
+    n_idx = xp.arange(N, dtype=xp.int64)[:, None, None]
+
+    # Pega os 4 vizinhos: resultado (N, C, H_out, W_out)
+    Ia = input[n_idx, :, iy0_cl, ix0_cl]  # (N,C,H_out,W_out)
+    Ib = input[n_idx, :, iy0_cl, ix1_cl]
+    Ic = input[n_idx, :, iy1_cl, ix0_cl]
+    Id = input[n_idx, :, iy1_cl, ix1_cl]
+
+    Ia = xp.transpose(Ia, (0, 3, 1, 2))  # -> (N, C, H_out, W_out)
+    Ib = xp.transpose(Ib, (0, 3, 1, 2))
+    Ic = xp.transpose(Ic, (0, 3, 1, 2))
+    Id = xp.transpose(Id, (0, 3, 1, 2))
+
+    # Adapta pesos para broadcast com C
+    wa = wa[:, None, :, :]  # (N,1,H_out,W_out)
+    wb = wb[:, None, :, :]
+    wc = wc[:, None, :, :]
+    wd = wd[:, None, :, :]
+
+    # Combinação bilinear final
+    out = wa * Ia + wb * Ib + wc * Ic + wd * Id  # (N, C, H_out, W_out)
+    return out
+
+#_______________________________________________________________________
+
+        
+        # Loop over angles and elements
 for t, td, ta in tqdm(zip(ang_list, txdel, txapo),
                       total=len(ang_list),
                       desc="Beamforming TX angles"):
-    
-    # Dados IQ do disparo t e elemento r
-    # i_chan = idata[t, r]   # (Nsamples,)
-    # q_chan = qdata[t, r]
-    # Grab data from t-th Tx
-    # print(f"iqdata[t]=> {iqdata[t]}")
-    iq = xp.array(iqdata[t], dtype=xp.float32)
-    # print(f"iq => {iq.shape}")
-    # Soma dos atrasos (índices fracionários)
-    # print(f"td => {td.shape}")
-    delays = td + rxdel       # (Npixels,)
-    # print(f"delays => {delays.shape}")
-    delays = xp.expand_dims(delays, axis=-1)
-    # print(f"delays => {delays.shape}")
-    
-    # Apply delays
-    ifoc, qfoc = apply_delays(iq, delays)
-    
-    # Interpolação linear 1D
-    # samples = xp.arange(i_chan.size)
-    # ifoc = xp.interp(delays, samples, i_chan, left=0.0, right=0.0)
-    # qfoc = xp.interp(delays, samples, q_chan, left=0.0, right=0.0)
+    # for t, td, ta in tqdm(zip(self.ang_list, txdel, txapo), total=nangles):
+    for r, rd, ra in zip(ele_list, rxdel, rxapo):
+        # Grab data from t-th Tx, r-th Rx
+        # iq: (1, 2, 1, nsamps)
+        iq = xp.stack([idata[t, r], qdata[t, r]], axis=0).reshape(1, 2, 1, -1)
+        # print(f"iq  => {iq.shape}")
+        delays = td + rd
+        # print(f"delays  => {delays.shape}")
+        # dgs: normaliza delays (tempo) para [-1,1] e coloca como eixo x
+        dgs_time = ((delays.reshape(1, 1, -1, 1) * 2 + 1) / idata.shape[-1]) - 1  # (1,1,npix,1)
+        # print(f"dgs_time  => {dgs_time.shape}")
+        # segundo eixo (y) = 0, porque H=1 → efeito 1D no tempo
+        dgs = xp.concatenate([dgs_time, 0 * dgs_time], axis=-1)  # (1,1,npix,2)
 
-    # FDEMOD = 0 NÃO PRECISA DESSE IF
-    # # Rotação de fase (caso demodulada)
-    # if fdemod != 0:
-    #     tshift = delays / fs - grid[:, 2] * 2 / c
-    #     theta = 2 * xp.pi * fdemod * tshift
-    #     cos_t, sin_t = xp.cos(theta), xp.sin(theta)
-    #     ifoc, qfoc = ifoc * cos_t - qfoc * sin_t, ifoc * sin_t + qfoc * cos_t
+        # aplica nosso grid_sample_xp
+        out = grid_sample_xp(iq, dgs, align_corners=False)  # (1,2,1,npix)
+        # reshape para ficar igual ao PyTorch .view(2, -1)
+        out = out.reshape(2, -1)
+        ifoc = out[0]
+        qfoc = out[1]
+        # Apply phase-rotation if focusing demodulated data
+        # if fdemod != 0:
+        #     tshift = delays.view(-1) / fs - grid[:, 2] * 2 / c
+        #     theta = 2 * PI * demod * tshift
+        #     ifoc, qfoc = _complex_rotate(ifoc, qfoc, theta)
+        # Apply apodization, reshape, and add to running sum
+        apods = ta * ra
+        idas += ifoc * apods
+        qdas += qfoc * apods
 
-    # Apodização TX × RX e soma
-    apods = ta * rxapo
-    idas += xp.sum(ifoc * apods, axis=0)
-    qdas += xp.sum(qfoc * apods, axis=0)
-    
-idas = xp.reshape(idas, out_shape)
-qdas = xp.reshape(qdas, out_shape)
+# Finally, restore the original pixel grid shape and convert to numpy array
+idas = idas.reshape(out_shape)
+qdas = qdas.reshape(out_shape)
+   
+# idas = xp.reshape(idas, out_shape)
+# qdas = xp.reshape(qdas, out_shape)
 print(f"idas => {idas.shape}")
 
 print(f"qdas => {qdas.shape}")
@@ -374,7 +486,16 @@ bimg_db -= np.amax(bimg_db)
 # bimg_db = np.abs(iq)
 # bimg_db /= np.amax(bimg_db)
 
+# Calcula a magnitude (amplitude)
 
+# bimg = np.abs(iq)
+
+# # Normaliza e converte para dB
+# bimg /= (bimg.max() + 1e-12)
+# bimg_db = 20 * np.log10(bimg + 1e-12)
+
+# # Limita a faixa dinâmica (por exemplo, -60 dB)
+bimg_db = np.clip(bimg_db, -60, 0)
 print(f"BIM DB => {bimg_db.shape}")
 
 #------------------------------------------------------------------------
@@ -395,9 +516,8 @@ zmin, zmax = float(z_cpu.min()), float(z_cpu.max())
 
 # origin='upper' → use [xmin, xmax, zmax, zmin] para profundidade “pra baixo”
 extent = [xmin*1e3, xmax*1e3,zmax*1e3,zmin*1e3]
-
-plt.figure(figsize=(6, 8))
-plt.imshow(bimg_db, vmin=-60,cmap="gray", origin="upper", extent=extent)
+plt.figure()
+plt.imshow(bimg_db, cmap="gray", origin="upper",aspect="auto", extent=extent)
 plt.title("Imagem B-mode")
 plt.xlabel("Lateral")
 plt.ylabel("Profundidade")
