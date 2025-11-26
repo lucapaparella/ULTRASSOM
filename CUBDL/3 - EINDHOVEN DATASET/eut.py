@@ -540,7 +540,7 @@ for acq in imagens:
     # origin='upper' → use [xmin, xmax, zmax, zmin] para profundidade “pra baixo”
     extent = [xmin*1e3, xmax*1e3,zmax*1e3,zmin*1e3]
     plt.figure()
-    plt.imshow(bimg_db, cmap="gray", origin="upper",aspect="auto", extent=extent)
+    plt.imshow(bimg_db, cmap="gray", origin="upper", extent=extent)
     plt.title("Imagem B-mode")
     plt.xlabel("Lateral")
     plt.ylabel("Profundidade")
