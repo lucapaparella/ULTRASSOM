@@ -1,56 +1,114 @@
+# ============================================================
+# RECONSTRUÇÃO DE IMAGEM ULTRASSÔNICA B-MODE (DAS / PLANE WAVE)
+#
+# Este script foi reelaborado a partir de materiais e arquivos
+# disponibilizados pelo CUBDL (Challenge on Ultrasound Beamforming),
+# incluindo adaptações, reorganização das etapas, melhorias de
+# legibilidade, tradução de comentários e integração com backend
+# NumPy/CuPy para execução em CPU ou GPU.
+#
+# Uso educacional e de pesquisa.
+# ============================================================
+
 import h5py, numpy as np
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import os
 from pathlib import Path
+# Ignorar avisos do cupyx
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
+# ============================================================
+# SCRIPT DE RECONSTRUÇÃO B-MODE (PLANE WAVE / DAS)
+# ------------------------------------------------------------
+# - Carrega um arquivo HDF5 da base CUBDL (MYOxxx.hdf5)
+# - Configura backend NumPy/CuPy (CPU ou GPU)
+# - Monta grade de pixels (x,z)
+# - Calcula atrasos TX/RX + apodizações
+# - Faz o beamforming somando I/Q em cada pixel
+# - Gera imagem B-mode em dB e plota/salva
+# ============================================================
 
-# matplotlib.use("Agg")     # sem X11 → salva em arquivo
-
-#limpar a tela
+# Limpar a tela do terminal (opcional, apenas estético)
 os.system("clear")
-imagens= list(range(24, 35))
-# imagens= [3]
 
-# Caminho do arquivo
+flag= True # para ver somente uma vez a estrutura do dataset
+
+# ============================================================
+# BACKEND NUMPY/CUPY (CPU OU GPU)
+# ============================================================
+USE_CUDA = True         # se True, tenta usar GPU com CuPy
+xp = np                 # por padrão, usamos NumPy
+to_cpu = lambda a: a    
+hilbert_xp = None       # será preenchido com hilbert da CPU ou GPU
+
+if USE_CUDA:
+    try:
+        import cupy as cp
+        from cupyx.scipy.signal import hilbert as c_hilbert
+        if cp.cuda.runtime.getDeviceCount() > 0:
+            # Pelo menos uma GPU disponível
+            xp = cp
+            hilbert_xp = c_hilbert
+            to_cpu = cp.asnumpy
+            dev = cp.cuda.Device()
+            dev.use()
+            print(f"[CUDA] Usando GPU: {cp.cuda.runtime.getDeviceProperties(0)['name'].decode()}".center(64))
+            print("*" * 64)
+        else:
+            print("[CUDA] Nenhuma GPU detectada. Usando CPU (NumPy)".center(64))
+            print("*" * 64)
+    except Exception as e:
+        print(f"[CUDA] CuPy indisponível ({e}). Usando CPU (NumPy).")
+        print("*" * 64)
+
+# Se não deu para usar CuPy, cai pro SciPy/NumPy na CPU
+if hilbert_xp is None:
+    from scipy.signal import hilbert as s_hilbert
+    hilbert_xp = s_hilbert
+
+# ============================================================
+# PARÂMETROS FÍSICOS E CARREGAMENTO DOS DADOS
+# ============================================================
+
+# Lista de aquisições a processar.
+# Aqui, imagens = [0, 1, ..., 10], permitindo reconstruir múltiplos
+imagens= list(range(24, 35))
+
+# Para cada número da lista, executa a reconstrução correspondente,
 for acq in imagens:
+    # Caminho do arquivo
     caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/"
-    # Make sure the selected dataset is valid
     dataset = "JHU{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset
 
-    # Abrindo o arquivo
+    # ------------------------------------------------------------
+    # Abertura do arquivo HDF5 e inspeção básica da estrutura
+    # ------------------------------------------------------------
     arquivo = h5py.File(path, "r")
-    # --------- Backend: CUDA (CuPy) se disponível; caso contrário NumPy ----------
-    USE_CUDA = True
-    xp = np
-    to_cpu = lambda a: a
-    hilbert_xp = None
 
-    if USE_CUDA:
-        try:
-            import cupy as cp
-            from cupyx.scipy.signal import hilbert as c_hilbert
-            if cp.cuda.runtime.getDeviceCount() > 0:
-                xp = cp
-                hilbert_xp = c_hilbert
-                to_cpu = cp.asnumpy
-                dev = cp.cuda.Device()
-                dev.use()
-                print(f"[CUDA] Usando GPU: {cp.cuda.runtime.getDeviceProperties(0)['name'].decode()}")
-            else:
-                print("[CUDA] Nenhuma GPU detectada. Usando CPU (NumPy).")
-        except Exception as e:
-            print(f"[CUDA] CuPy indisponível ({e}). Usando CPU (NumPy).")
+    def nome_e_tipo(nome, obj):
+        """
+        Função de callback para 'visititems' do h5py:
+        - Imprime o nome de cada GRUPO e DATASET encontrado no arquivo.
+        - Mostra também shape e tipo (dtype) dos datasets.
+        """
+        if isinstance(obj, h5py.Group):
+            print(f"GRUPO    => {nome}")
+        elif isinstance(obj, h5py.Dataset):
+            print(f"DATASET  => {nome.center(25)} | {str(obj.shape).center(15)} | {obj.dtype}")
 
-    if hilbert_xp is None:
-        # fallback para CPU
-        from scipy.signal import hilbert as s_hilbert
-        hilbert_xp = s_hilbert
-    # input("Aperte ENTER para continuar...")
-    # Get data
+    if flag:
+        print("EXPLORANDO O ARQUIVO HDF5".center(64))
+        print("*" * 64)
+        arquivo.visititems(nome_e_tipo)
+        print("*" * 64)
+        flag=False
+
+
+    # Ajuste da velocidade do som de acordo com a aquisição
     idata = xp.array(arquivo["channel_data"], dtype="float32")
-    print(f"idata => {idata.shape}")
     qdata = xp.imag(hilbert_xp(idata, axis=-1))
     angles = xp.array(arquivo["angles"])
     fc = xp.array(arquivo["modulation_frequency"]).item()
@@ -60,19 +118,15 @@ for acq in imagens:
     fdemod = 0
 
     xpos = xp.array(arquivo["element_positions"], dtype="float32").T
-    print(f"xpos => {xpos}")
     ele_pos = xp.stack([xpos, 0 * xpos, 0 * xpos], axis=1)
-    print(f"ele_pos => {ele_pos.shape}")
 
     xlims = xp.array([ele_pos[0, 0], ele_pos[-1, 0]])
-    # self.zlims = xp.array([0e-3, idata.shape[2] * c / fs / 2])
     zlims = [3e-3, 30e-3]
 
     # Define pixel grid limits (assume y == 0)
     wvln = c / fc
     dx = wvln / 2.5
     dz = dx  # Use square pixels
-    # grid = make_pixel_grid(xlims, zlims, dx, dz)
     fnum = 1
 
     # OUTPUTS
@@ -84,37 +138,26 @@ for acq in imagens:
     zz, xx = xp.meshgrid(z, x, indexing="ij")
     yy = 0 * xx
     grid = xp.stack((xx, yy, zz), axis=-1)
-    print(f"grid => {grid.shape}")
 
     # grid = xp.constant(grid, dtype=xp.float32)
     grid = xp.reshape(grid, (-1, 3))
     out_shape = grid.shape[:-1]
 
-
     ang_list = range(angles.shape[0])
-    print(f"ang_list => {ang_list}")
 
     ele_list = range(ele_pos.shape[0])
-    print(f"ele_list => {ele_list}")
 
     nangles = len(ang_list)
-    print(f"nangles => {nangles}")
     nelems = len(ele_list)
-    print(f"nelems => {nelems}")
     npixels = grid.shape[0]
-    print(f"npixels => {npixels}")
     xlims_1 = (ele_pos[0, 0], ele_pos[-1, 0])  # Aperture width
-    print(f"xlims_1 => {xlims_1}")
 
     # Initialize delays, apodizations, output array
     txdel = xp.zeros((nangles, npixels), dtype="float32")
-    print(f"txdel => {txdel.shape}")
     rxdel = xp.zeros((nelems, npixels), dtype="float32")
-    print(f"rxdel => {rxdel.shape}")
     txapo = xp.ones((nangles, npixels), dtype="float32")
-    print(f"txapo => {txapo.shape}")
     rxapo = xp.ones((nelems, npixels), dtype="float32")
-    print(f"rxapo => {rxapo.shape}")
+    
 
     #   grid    Pixel positions in x,y,z    [npixels, 3]
     #   angles  Plane wave angles (radians) [nangles]
@@ -150,9 +193,6 @@ for acq in imagens:
         txdel[i] += time_zero[tx] * c
         txapo[i] = apod_plane(grid, angles[tx], xlims)
 
-    print(f"txdel => {txdel.shape}")
-    print(f"txapo => {txapo.shape}")
-
     #   grid    Pixel positions in x,y,z    [npixels, 3]
     #   ele_pos Element positions in x,y,z  [nelems, 3]
     # OUTPUTS
@@ -184,28 +224,20 @@ for acq in imagens:
         # Output has shape [nelems, npixels]
         return apod
 
-
-
     for j, rx in enumerate(ele_list):
         rxdel[j] = delay_focus(grid, ele_pos[rx])
         rxapo[j] = apod_focus(grid, ele_pos[rx])
 
-    print(f"rxdel => {rxdel.shape}")
-    print(f"txapo => {txapo.shape}")
-
     # Convert to samples
     txdel *= fs / c
     rxdel *= fs / c
-
-    # Make data torch tensors
-    # iqdata = (idata, qdata)
 
     # Initialize the output array
     idas = xp.zeros(npixels, dtype="float")
     qdas = xp.zeros(npixels, dtype="float")
     for t, td, ta in tqdm(zip(ang_list, txdel, txapo),
                         total=len(ang_list),
-                        desc="Beamforming TX angles"):
+                        desc=f"Beamforming => IMAGEM {acq}"):
         for r, rd, ra in zip(ele_list, rxdel, rxapo):
             # Dados IQ do disparo t e elemento r
             i_chan = idata[t, r]   # (Nsamples,)
@@ -248,19 +280,9 @@ for acq in imagens:
 
     # iq veio de grid achatado -> reshape para (nz, nx)
     bimg = np.abs(iq).reshape(nz, nx)
-
-
-    # log-compress  (uma vez só) + normalização
-    # bimg = bimg / (bimg.max() + 1e-12)
-    # bimg_db = 20 * np.log10(bimg + 1e-12)
-    # bimg_db = xp.clip(bimg_db, -60, 0)   # janela dinâmica opcional
-    # bimg_db = 10* np.log10(np.abs(bimg.T) / np.max(np.abs(bimg)))
-
     bimg /= (bimg.max() + 1e-12)
     bimg_db = 20*np.log10(bimg + 1e-12)  # ou 10*log10(power)
 
-
-    print(f"BIM DB => {bimg_db.shape}")
     # extent (tudo em NumPy/CPU)
     x_cpu = to_np(x)
     z_cpu = to_np(z)
@@ -278,7 +300,7 @@ for acq in imagens:
     plt.show()
 
     #salvar arquivo
-    def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS_SALVAS", dpi=200):
+    def save_fig(fig=None, nome_base="reconstrucao", pasta="IMAGENS", dpi=200):
         """Salva a figura atual em ./IMAGENS_SALVAS/<nome_base>[_N].png e imprime o caminho."""
         fig = fig or plt.gcf()
         Path(pasta).mkdir(parents=True, exist_ok=True)
@@ -294,4 +316,4 @@ for acq in imagens:
 
 
     # # >>> Salva em ./IMAGENS_SALVAS/reconstrucao.png (ou reconstrucao_1.png, etc.)
-    save_fig(nome_base="reconstrucao")
+    # save_fig(nome_base="reconstrucao")
