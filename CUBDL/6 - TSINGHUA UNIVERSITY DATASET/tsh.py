@@ -1,3 +1,4 @@
+
 # ============================================================
 # RECONSTRUÇÃO DE IMAGEM ULTRASSÔNICA B-MODE (DAS / PLANE WAVE)
 #
@@ -22,9 +23,11 @@ import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import os
 from pathlib import Path
-# Ignorar avisos de recursos experimentais do CuPy (apenas para não poluir o terminal)
+# Ignorar avisos de recursos experimentais do CuPy (apenas para evitar poluição do terminal)
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+
 
 # ============================================================
 # OBJETIVO GERAL DO SCRIPT
@@ -83,20 +86,20 @@ if USE_CUDA:
             dev.use()                    # Seleciona o dispositivo padrão
 
             # Imprime o nome da GPU detectada (meramente informativo)
-            print(f"[CUDA] Usando GPU: {cp.cuda.runtime.getDeviceProperties(0)['name'].decode()}".center(64))
-            print("*" * 64)
+            print(f"[CUDA] Usando GPU: {cp.cuda.runtime.getDeviceProperties(0)['name'].decode()}".center(74))
+            print("*" * 74)
 
         else:
             # CuPy está instalado, mas nenhuma GPU foi detectada
             # → Mantém o processamento na CPU com NumPy
-            print("[CUDA] Nenhuma GPU encontrada. Executando no CPU (NumPy)".center(64))
-            print("*" * 64)
+            print("[CUDA] Nenhuma GPU encontrada. Executando no CPU (NumPy)".center(74))
+            print("*" * 74)
 
     except Exception as e:
         # Algum problema ao importar CuPy ou ao acessar a GPU
         # → Faz o fallback automático para NumPy/CPU
         print(f"[CUDA] Erro ao tentar usar CuPy ({e}). Executando no CPU (NumPy).")
-        print("*" * 64)
+        print("*" * 74)
 
 # Se, ao final da tentativa de usar CUDA, ainda não tivermos definido
 # "hilbert_xp", significa que ficaremos no CPU e devemos usar a Hilbert
@@ -109,10 +112,10 @@ if hilbert_xp is None:
 # DEFINIÇÃO DAS IMAGENS A PROCESSAR
 # ------------------------------------------------------------
 # Aqui dizemos quais arquivos de aquisição iremos processar.
-# O dataset segue o padrão "JHUXXX.hdf5", onde XXX é o número da imagem.
-# Exemplo: imagens = [24, 25, ..., 34] → processa JHU024, JHU025, ..., JHU034
+# O dataset segue o padrão "TSHXXX.hdf5", onde XXX é o número da imagem.
 # ============================================================
-imagens = list(range(24, 35))
+
+imagens= list(range(3, 21))
 
 # Loop principal: reconstrói uma imagem por vez
 for acq in imagens:
@@ -120,11 +123,11 @@ for acq in imagens:
     # ------------------------------------------------------------
     # ABERTURA DO ARQUIVO HDF5 E INSPEÇÃO DA ESTRUTURA
     # ------------------------------------------------------------
-    # "caminho" é o diretório onde estão os arquivos .hdf5 da base JHU
-    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/2_Post_CUBDL_JHU_Breast_Data/"
-    dataset = "JHU{:03d}".format(acq) + ".hdf5"   # Ex.: "JHU024.hdf5"
+    # "caminho" é o diretório onde estão os arquivos .hdf5 da base TSH
+    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/3_Additional_CUBDL_Data/Plane_Wave_Data/TSH/"
+    dataset = "TSH{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset
-
+    
     # Abre o arquivo HDF5 em modo somente leitura ("r")
     arquivo = h5py.File(path, "r")
 
@@ -143,55 +146,138 @@ for acq in imagens:
           - descobrir nomes e tamanhos dos datasets que iremos ler.
         """
         if isinstance(obj, h5py.Group):
-            print(f"GRUPO    => {nome}")
+            print(f"GRUPO => {nome}")
         elif isinstance(obj, h5py.Dataset):
-            print(f"DATASET  => {nome.center(25)} | {str(obj.shape).center(15)} | {obj.dtype}")
+            print(f"DATASET => {nome.center(35)} | {str(obj.shape).center(15)} | {obj.dtype}")
 
     # Mostra a estrutura do arquivo apenas na primeira imagem processada.
     # Depois disso, a flag passa a False e não volta a imprimir.
     if flag:
-        print("EXPLORANDO O ARQUIVO HDF5".center(64))
-        print("*" * 64)
+        print("EXPLORANDO O ARQUIVO HDF5".center(80))
+        print("*" * 74)
         arquivo.visititems(nome_e_tipo)
-        print("*" * 64)
+        print("*" * 74)
         flag = False
 
     # ------------------------------------------------------------
     # CARREGAMENTO DOS DADOS FÍSICOS E DO SINAL
     # ------------------------------------------------------------
-    # 'channel_data' traz os sinais brutos por:
-    #   - ângulo de transmissão;
-    #   - elemento do transdutor;
-    #   - amostras no tempo.
-    # Aqui carregamos como componente I (real) e geramos a componente Q
-    # a partir da transformada de Hilbert.
-    idata = xp.array(arquivo["channel_data"], dtype="float32")   # Componente I (real) do sinal
-    qdata = xp.imag(hilbert_xp(idata, axis=-1))                  # Componente Q (imaginária) via Hilbert ao longo do tempo
+    # Vetor de ângulos das ondas planas (em radianos) para cada transmissão
+    angles = xp.array(arquivo["angles"])
 
-    # Informações da aquisição armazenadas no arquivo HDF5
-    angles = xp.array(arquivo["angles"])                         # Vetor de ângulos das ondas planas (em radianos)
-    fc = xp.array(arquivo["modulation_frequency"]).item()        # Frequência central do transdutor (Hz)
-    fs = xp.array(arquivo["sampling_frequency"]).item()          # Frequência de amostragem (Hz)
-    c  = xp.array(arquivo["sound_speed"]).item()                 # Velocidade do som (m/s)
-    # 'time_zero' define uma referência temporal do dataset.
-    # Multiplicamos por -1 para ajustar o sentido do eixo temporal usado no cálculo de atrasos.
-    time_zero = -1 * xp.array(arquivo["time_zero"], dtype="float32")
-    fdemod = 0                                                   # Aqui não aplicamos demodulação (ficamos em banda passante)
+    # Sinal bruto de RF do dataset:
+    #   "channel_data" vem em um formato achatado, que vamos reorganizar.
+    #   Carregamos como float32 para reduzir memória e padronizar o tipo.
+    idata = xp.array(arquivo["channel_data"], dtype="float32")
 
-    # Posições físicas dos elementos do transdutor (a princípio 1D em x)
-    xpos = xp.array(arquivo["element_positions"], dtype="float32").T
-    # Convertemos para um vetor 3D (x, y, z), assumindo que os elementos
-    # estão ao longo de x, na superfície z=0 e y=0.
+    # Reorganiza a dimensão dos dados assumindo:
+    #   - 128 elementos (canais) no transdutor
+    #   - len(angles) ângulos de transmissão
+    #   - "-1" deixa o xp calcular automaticamente o número de amostras no tempo
+    # Resultado:
+    #   idata.shape = (128, n_angles, n_amostras)
+    idata = xp.reshape(idata, (128, len(angles), -1))
+
+    # Troca a ordem dos eixos para ficar no formato:
+    #   (n_angles, n_elementos, n_amostras)
+    # Isso facilita percorrer primeiro pelos ângulos e depois pelos elementos.
+    idata = xp.transpose(idata, (1, 0, 2))
+
+    # Gera a componente Q (parte imaginária) aplicando a transformada de Hilbert
+    # ao longo do eixo do tempo (axis=-1). No final teremos:
+    #   - idata → componente I
+    #   - qdata → componente Q
+    qdata = xp.imag(hilbert_xp(idata, axis=-1))
+
+    # Frequência central (fc) do transdutor em Hz
+    fc = xp.array(arquivo["modulation_frequency"]).item()
+
+    # Frequência de amostragem (fs) do sinal em Hz
+    fs = xp.array(arquivo["sampling_frequency"]).item()
+
+    # Velocidade do som (c) utilizada na aquisição, em m/s
+    c = xp.array(arquivo["sound_speed"]).item()
+
+    # Vetor de "time_zero" (referência temporal) para cada ângulo.
+    # Aqui é inicializado com zeros, ou seja, não estamos aplicando
+    # nenhum ajuste de tempo específico por ângulo.
+    time_zero = xp.zeros((len(angles),), dtype="float32")
+
+    # Frequência de demodulação. Como está em zero, significa que
+    # não estamos fazendo demodulação para banda-base neste script.
+    fdemod = 0
+
+
+    # ------------------------------------------------------------
+    # Construção das posições físicas dos elementos do transdutor
+    # ------------------------------------------------------------
+    # Muitos datasets do CUBDL usam a geometria do transdutor L11-4v.
+    # Ele é um transdutor linear (elementos alinhados ao longo do eixo x).
+
+    # Distância (passo) entre o centro de cada elemento, em metros.
+    # O L11-4v possui pitch ≈ 0.3 mm.
+    pitch = 0.3e-3   # 0.3 mm
+
+    # Número de elementos do transdutor.
+    # Aqui pegamos da segunda dimensão de idata:
+    #   idata.shape = (n_angles, n_elementos, n_amostras)
+    nelems = idata.shape[1]
+
+    # Coordenadas em x de cada elemento:
+    #   - começa em 0
+    #   - incrementa pitch a cada elemento
+    # Ex.: [0, pitch, 2*pitch, ..., (nelems-1)*pitch]
+    xpos = xp.arange(nelems) * pitch
+
+    # Centraliza a abertura em x = 0:
+    #   Subtraímos a média de xpos para que os elementos fiquem
+    #   distribuídos simetricamente ao redor da origem.
+    xpos -= xp.mean(xpos)
+
+    # Cria um vetor 3D de posições dos elementos: (x, y, z)
+    # Como o transdutor é linear e está na superfície, adotamos:
+    #   y = 0  (sem variação lateral fora do plano)
+    #   z = 0  (elementos posicionados no nível da superfície)
     ele_pos = xp.stack([xpos, 0 * xpos, 0 * xpos], axis=1)
 
-    # Limites laterais (em x) do transdutor.
-    # Eles definem a abertura física que será usada como referência
-    # para a apodização e para a região de imagem em x.
-    xlims = xp.array([ele_pos[0, 0], ele_pos[-1, 0]])
 
-    # Limites de profundidade da imagem (em z).
-    # Aqui definimos manualmente que a imagem vai de 3 mm a 30 mm.
-    zlims = [3e-3, 30e-3]    # 0,003 m até 0,030 m
+    # ------------------------------------------------------------
+    # Ajuste de "time zero" para cada ângulo de transmissão
+    # ------------------------------------------------------------
+    # Neste dataset específico, o 'time_zero' representa um deslocamento
+    # temporal necessário para alinhar corretamente o início da aquisição.
+    # Ele compensa o fato de que, para ondas planas inclinadas, a frente
+    # de onda atinge o campo de visão em tempos diferentes.
+    #
+    # A regra adotada aqui é: o time_zero deve corresponder ao tempo que
+    # a extremidade da abertura (elemento mais à direita) leva para alinhar
+    # a frente de onda ao centro da imagem.
+    #
+    # Para cada ângulo 'a', calculamos um pequeno tempo extra para
+    # sincronizar todos os ângulos, garantindo que a propagação comece
+    # consistentemente no centro.
+    # ------------------------------------------------------------
+    for i, a in enumerate(angles):
+        # ele_pos[-1, 0]  → posição x do último elemento do transdutor
+        #
+        # xp.abs(xp.sin(a)) → componente horizontal da onda plana
+        #                     (quanto mais inclinado o ângulo, maior o atraso
+        #                      necessário para alinhar o centro com a borda)
+        #
+        # Dividimos por 'c' (velocidade do som) para converter distância → tempo.
+        #
+        # Resultado: atraso temporal necessário para "trazer" a onda inclinada
+        # ao mesmo ponto de referência do centro da abertura.
+        time_zero[i] = ele_pos[-1, 0] * xp.abs(xp.sin(a)) / c
+
+
+    # Limites laterais da imagem (em x):
+    # usam a posição do primeiro e do último elemento do transdutor.
+    xlims = [ele_pos[0, 0], ele_pos[-1, 0]]
+
+    # Limites de profundidade da imagem (em z):
+    # começa em 10 mm e vai até 45 mm.
+    zlims = [10e-3, 45e-3]
 
     # ------------------------------------------------------------
     # CRIAÇÃO DA GRADE DE PIXELS (COORDENADAS X E Z)
@@ -777,3 +863,6 @@ for acq in imagens:
 
     # Salva a imagem reconstruída da aquisição atual
     save_fig()
+
+
+   
