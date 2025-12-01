@@ -783,7 +783,7 @@ for acq in imagens:
     # vmin=-60 define uma faixa dinâmica de 60 dB abaixo do máximo:
     # pixels com intensidade menor que -60 dB "somem" (ficam saturados no preto).
     plt.imshow(bimg_db, vmin=-60, cmap="gray", origin="upper",
-                aspect="auto", extent=extent)
+                aspect="equal", extent=extent)
     plt.title("Imagem B-mode")
     plt.xlabel("Lateral (mm)")
     plt.ylabel("Profundidade (mm)")
