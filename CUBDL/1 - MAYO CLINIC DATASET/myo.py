@@ -100,9 +100,7 @@ if USE_CUDA:
         print(f"[CUDA] Erro ao tentar usar CuPy ({e}). Executando no CPU (NumPy).")
         print("*" * 74)
 
-# Se, ao final da tentativa de usar CUDA, ainda não tivermos definido
-# "hilbert_xp", significa que ficaremos no CPU e devemos usar a Hilbert
-# do SciPy (versão original).
+# Se não estiver usando GPU, usa a versão da Hilbert do SciPy (CPU)
 if hilbert_xp is None:
     from scipy.signal import hilbert as s_hilbert
     hilbert_xp = s_hilbert
