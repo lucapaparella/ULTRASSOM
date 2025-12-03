@@ -212,14 +212,6 @@ for acq in imagens:
     # Monta posições 3D dos elementos (x, y=0, z=0)
     ele_pos = xp.stack([xpos, 0 * xpos, 0 * xpos], axis=1)
 
-
-    # For this dataset, time zero is the center point
-    for i, a in enumerate(angles):
-        time_zero[i] = ele_pos[-1, 0] * xp.abs(xp.sin(a)) / c
-
-    xlims = [ele_pos[0, 0], ele_pos[-1, 0]]
-    zlims = [8e-3, 55e-3]
-
     # Calcula o time_zero para cada ângulo (ajuste temporal da onda plana)
     for i, a in enumerate(angles):
         time_zero[i] = ele_pos[-1, 0] * xp.abs(xp.sin(a)) / c
