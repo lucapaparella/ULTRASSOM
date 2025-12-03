@@ -110,7 +110,7 @@ if hilbert_xp is None:
 
 # Se não estiver usando GPU, usa a versão da convolve1d do SciPy (CPU)
 if convolve_xp is None:
-        from scipy.ndimage import convolve1d as s_convolve
+        from scipy.ndimage import convolve as s_convolve
         convolve_xp = s_convolve
 
 # ============================================================
@@ -127,12 +127,9 @@ for acq in imagens:
     # ABERTURA DO ARQUIVO HDF5 E INSPEÇÃO DA ESTRUTURA
     # ------------------------------------------------------------
     # "caminho" é o diretório onde estão os arquivos .hdf5
-    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/"
-    # Make sure the selected dataset is valid
+    caminho = r"DATASETS/"
     dataset = "UFL{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset
-    # Abrindo o arquivo
-
     arquivo = h5py.File(path, "r")
 
     def nome_e_tipo(nome, obj):

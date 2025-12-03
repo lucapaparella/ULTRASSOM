@@ -100,9 +100,7 @@ if USE_CUDA:
         print(f"[CUDA] Erro ao tentar usar CuPy ({e}). Executando no CPU (NumPy).")
         print("*" * 74)
 
-# Se, ao final da tentativa de usar CUDA, ainda não tivermos definido
-# "hilbert_xp", significa que ficaremos no CPU e devemos usar a Hilbert
-# do SciPy (versão original).
+# Se não estiver usando GPU, usa a versão da Hilbert do SciPy (CPU)
 if hilbert_xp is None:
     from scipy.signal import hilbert as s_hilbert
     hilbert_xp = s_hilbert
@@ -111,14 +109,13 @@ if hilbert_xp is None:
 # DEFINIÇÃO DAS IMAGENS A PROCESSAR
 # ------------------------------------------------------------
 # Aqui dizemos quais arquivos de aquisição iremos processar.
-# O dataset segue o padrão "TSHXXX.hdf5", onde XXX é o número da imagem.
 # ============================================================
  
 imagens= list(range(2, 8))
 
 # Loop principal: reconstrói uma imagem por vez
 for acq in imagens:
-    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/3_Additional_CUBDL_Data/Plane_Wave_Data/"
+    caminho = r"DATASETS/"
     # Make sure the selected dataset is valid
     dataset = "OSL{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset

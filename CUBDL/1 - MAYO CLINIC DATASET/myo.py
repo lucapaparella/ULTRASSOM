@@ -109,7 +109,6 @@ if hilbert_xp is None:
 # DEFINIÇÃO DAS IMAGENS A PROCESSAR
 # ------------------------------------------------------------
 # Aqui dizemos quais arquivos de aquisição iremos processar.
-# O dataset segue o padrão "MYOXXX.hdf5", onde XXX é o número da imagem.
 # ============================================================
 
 imagens= list(range(1, 6))
@@ -120,8 +119,8 @@ for acq in imagens:
     # ------------------------------------------------------------
     # ABERTURA DO ARQUIVO HDF5 E INSPEÇÃO DA ESTRUTURA
     # ------------------------------------------------------------
-    # "caminho" é o diretório onde estão os arquivos .hdf5 da base TSH
-    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/1_CUBDL_Task1_Data/"
+    # "caminho" é o diretório onde estão os arquivos .hdf5 
+    caminho = r"DATASETS/"
     dataset = "MYO{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset
     # Abre o arquivo HDF5 em modo somente leitura ("r")

@@ -101,9 +101,7 @@ if USE_CUDA:
         print(f"[CUDA] Erro ao tentar usar CuPy ({e}). Executando no CPU (NumPy).")
         print("*" * 74)
 
-# Se, ao final da tentativa de usar CUDA, ainda não tivermos definido
-# "hilbert_xp", significa que ficaremos no CPU e devemos usar a Hilbert
-# do SciPy (versão original).
+# Se não estiver usando GPU, usa a versão da Hilbert do SciPy (CPU)
 if hilbert_xp is None:
     from scipy.signal import hilbert as s_hilbert
     hilbert_xp = s_hilbert
@@ -112,7 +110,6 @@ if hilbert_xp is None:
 # DEFINIÇÃO DAS IMAGENS A PROCESSAR
 # ------------------------------------------------------------
 # Aqui dizemos quais arquivos de aquisição iremos processar.
-# O dataset segue o padrão "TSHXXX.hdf5", onde XXX é o número da imagem.
 # ============================================================
 
 imagens= list(range(3, 21))
@@ -123,8 +120,8 @@ for acq in imagens:
     # ------------------------------------------------------------
     # ABERTURA DO ARQUIVO HDF5 E INSPEÇÃO DA ESTRUTURA
     # ------------------------------------------------------------
-    # "caminho" é o diretório onde estão os arquivos .hdf5 da base TSH
-    caminho = r"/home/users/lpaparella/ULTRASSOM/IMAGENS/3_Additional_CUBDL_Data/Plane_Wave_Data/TSH/"
+    # "caminho" é o diretório onde estão os arquivos .hdf5 
+    caminho = r"DATASETS/"
     dataset = "TSH{:03d}".format(acq) + ".hdf5"
     path = caminho + dataset
     
